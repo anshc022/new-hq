@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import OfficeCanvas from '@/components/OfficeCanvas';
+import NodeGraph from '@/components/NodeGraph';
 import AgentsWorking from '@/components/AgentsWorking';
 import ChatLog from '@/components/ChatLog';
 import EventFeed from '@/components/EventFeed';
@@ -26,7 +26,6 @@ export default function Home() {
     const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
     supabaseRef.current = sb;
 
-    // Initial fetch
     sb.from('ops_agents').select('*').then(({ data }) => {
       if (data && data.length > 0) {
         setAgents(prev => {
@@ -51,12 +50,10 @@ export default function Home() {
 
     sb.from('ops_nodes').select('*').eq('name', 'ec2-main').single().then(({ data }) => {
       if (data) {
-        const lastSeen = new Date(data.last_seen || 0).getTime();
-        setNodeConnected(Date.now() - lastSeen < 120000);
+        setNodeConnected(Date.now() - new Date(data.last_seen || 0).getTime() < 120000);
       }
     });
 
-    // Realtime subscriptions
     const agentChannel = sb.channel('agents-rt')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'ops_agents' }, payload => {
         const row = payload.new;
@@ -70,41 +67,30 @@ export default function Home() {
           }
           return [...prev, row];
         });
-      })
-      .subscribe();
+      }).subscribe();
 
     const eventChannel = sb.channel('events-rt')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ops_events' }, payload => {
-        if (payload.new) {
-          setEvents(prev => [...prev.slice(-99), payload.new]);
-        }
-      })
-      .subscribe();
+        if (payload.new) setEvents(prev => [...prev.slice(-99), payload.new]);
+      }).subscribe();
 
     const msgChannel = sb.channel('messages-rt')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ops_messages' }, payload => {
-        if (payload.new) {
-          setMessages(prev => [...prev.slice(-99), payload.new]);
-        }
-      })
-      .subscribe();
+        if (payload.new) setMessages(prev => [...prev.slice(-99), payload.new]);
+      }).subscribe();
 
     const nodeChannel = sb.channel('nodes-rt')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'ops_nodes' }, payload => {
         const row = payload.new;
         if (row?.name === 'ec2-main') {
-          const lastSeen = new Date(row.last_seen || 0).getTime();
-          setNodeConnected(Date.now() - lastSeen < 120000);
+          setNodeConnected(Date.now() - new Date(row.last_seen || 0).getTime() < 120000);
         }
-      })
-      .subscribe();
+      }).subscribe();
 
-    // Heartbeat poll
     const hbInterval = setInterval(() => {
       sb.from('ops_nodes').select('*').eq('name', 'ec2-main').single().then(({ data }) => {
         if (data) {
-          const lastSeen = new Date(data.last_seen || 0).getTime();
-          setNodeConnected(Date.now() - lastSeen < 120000);
+          setNodeConnected(Date.now() - new Date(data.last_seen || 0).getTime() < 120000);
         } else {
           setNodeConnected(false);
         }
@@ -121,75 +107,109 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <StatsBar agents={agents} nodeConnected={nodeConnected} />
+    <div className="h-screen w-screen overflow-hidden flex flex-col bg-[#020305] text-[#00f0ff] relative selection:bg-[#ff0066] selection:text-white">
+      {/* Immersive HUD Overlays */}
+      <div className="pointer-events-none absolute inset-0 z-0 bg-[url('/grid.svg')] opacity-10 background-repeat" />
+      <div className="scan-overlay pointer-events-none absolute inset-0 z-50 mix-blend-overlay" />
+      <div className="pointer-events-none absolute inset-0 shadow-[inset_0_0_150px_rgba(0,0,0,0.9)] z-40" />
 
-      <main className="flex-1 w-full px-3 md:px-4 py-4 space-y-4">
-        {/* Agents Working Right Now */}
-        <div className="animate-fade-in">
-          <AgentsWorking agents={agents} events={events} />
-        </div>
+      {/* Extreme Sci-Fi Top Bar */}
+      <div className="z-30 shrink-0 border-b border-[#00f0ff30] bg-[#03060c]/80 backdrop-blur-md pb-1 relative">
+        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1/3 h-[2px] bg-gradient-to-r from-transparent via-[#ff0066] to-transparent shadow-[0_0_10px_#ff0066]" />
+        <StatsBar agents={agents} nodeConnected={nodeConnected} />
+      </div>
 
-        {/* Canvas + Mission Control side by side */}
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-4 animate-fade-in">
-          <div>
-            <OfficeCanvas agents={agents} nodeConnected={nodeConnected} events={events} />
+      {/* Main Dashboard Layout - Full Screen Grid */}
+      <main className="flex-1 w-full mx-auto p-4 z-10 grid grid-cols-12 grid-rows-[1fr_minmax(250px,auto)] gap-4 overflow-hidden h-full max-w-[1920px]">
+        
+        {/* Left Column: Events & System */}
+        <section className="col-span-3 row-span-1 flex flex-col gap-4 overflow-hidden h-full animate-slide-right">
+          <div className="flex-1 flex flex-col min-h-0 bg-[#060c18]/60 border border-[#00f0ff30] rounded-sm relative overflow-hidden backdrop-blur-[3px] group shadow-[0_0_20px_rgba(0,240,255,0.05)_inset]">
+            <DecoCorners color="#00f0ff" />
+            <SectionHeader icon="⚡" title="LIVE TELEMETRY" glitch />
+            <div className="flex-1 overflow-hidden p-1">
+              <EventFeed events={events} />
+            </div>
           </div>
-          <section className="animate-slide-up" style={{ animationDelay: '100ms' }}>
-            <SectionTitle icon="📊" label="MISSION CONTROL" />
-            <MissionBoard agents={agents} nodeConnected={nodeConnected} />
-          </section>
-        </div>
+        </section>
 
-        {/* Event Feed + Gateway Log */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <section className="animate-slide-up" style={{ animationDelay: '200ms' }}>
-            <SectionTitle icon="📡" label="EVENT FEED" count={events?.length} />
-            <EventFeed events={events} />
-          </section>
+        {/* Center: Stage Visualization */}
+        <section className="col-span-6 row-span-1 flex flex-col h-full bg-[#03060c]/40 border-[1px] border-[#ff006630] rounded-sm relative overflow-hidden backdrop-blur-sm animate-fade-in shadow-[0_0_40px_rgba(255,0,102,0.05)_inset]">
+          <div className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-[#ff0066] z-10" />
+          <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-[#ff0066] z-10" />
+          <SectionHeader icon="◈" title="CORE NEXUS TOPOLOGY" glowColor="#ff0066" />
+          <div className="flex-1 w-full h-full flex items-center justify-center relative P-2">
+             {/* Radial pulse background inside matrix */}
+             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80%] h-[80%] bg-[#ff0066] blur-[100px] opacity-[0.03] rounded-full pointer-events-none" />
+             <NodeGraph agents={agents} nodeConnected={nodeConnected} events={events} />
+          </div>
+        </section>
 
-          <section className="animate-slide-up" style={{ animationDelay: '300ms' }}>
-            <SectionTitle icon="💬" label="GATEWAY LOG" count={messages?.length} />
-            <ChatLog messages={messages} />
-          </section>
-        </div>
+        {/* Right Column: Mission Control */}
+        <section className="col-span-3 row-span-1 flex flex-col gap-4 overflow-hidden h-full animate-slide-left">
+          <div className="flex-1 flex flex-col min-h-0 bg-[#060c18]/60 border border-[#00f0ff30] rounded-sm relative overflow-hidden backdrop-blur-[3px] shadow-[0_0_20px_rgba(0,240,255,0.05)_inset]">
+            <DecoCorners color="#00f0ff" />
+            <SectionHeader icon="◆" title="COMMAND DIRECTIVE" />
+            <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 custom-scrollbar">
+              <MissionBoard agents={agents} nodeConnected={nodeConnected} />
+            </div>
+          </div>
+        </section>
+
+        {/* Bottom Bar: Working Agents & Chat logs side by side */}
+        <section className="col-span-12 row-span-1 grid grid-cols-12 gap-4 min-h-0 h-full animate-slide-up pb-2">
+          
+          <div className="col-span-8 bg-[#0a1224]/80 border border-[#00ff8840] rounded-sm relative flex flex-col overflow-hidden backdrop-blur-sm shadow-[0_0_20px_rgba(0,255,136,0.05)_inset]">
+             <DecoCorners color="#00ff88" thickness="2px" />
+             <div className="absolute right-0 top-0 w-32 h-[1px] bg-gradient-to-r from-transparent to-[#00ff88]" />
+             <div className="flex-1 overflow-hidden">
+               <AgentsWorking agents={agents} events={events} />
+             </div>
+          </div>
+
+          <div className="col-span-4 bg-[#0a0510]/80 border border-[#8800ff40] rounded-sm relative flex flex-col overflow-hidden backdrop-blur-sm shadow-[0_0_20px_rgba(136,0,255,0.05)_inset]">
+            <DecoCorners color="#8800ff" />
+            <SectionHeader icon="💬" title="COMM CHANNELS" glowColor="#8800ff" />
+            <div className="flex-1 overflow-hidden p-1 bg-[#020104]/50">
+              <ChatLog messages={messages} />
+            </div>
+          </div>
+
+        </section>
       </main>
-
-      {/* Footer */}
-      <footer className="relative mt-8 font-mono border-t-[3px] border-[var(--color-border)]">
-        <div className="text-center py-6 px-5">
-          <div className="flex items-center justify-center gap-4 mb-2">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 bg-[var(--color-accent)] border-2 border-white flex items-center justify-center text-[10px] neo-shadow-sm">⚡</div>
-              <span className="text-[11px] font-black text-white tracking-[0.2em]">OPS HQ</span>
-            </div>
-            <span className="w-px h-4 bg-[var(--color-border)]" />
-            <div className="flex items-center gap-1.5">
-              <span className="text-[9px] text-[var(--color-neo-purple)] font-black tracking-wider">OPENCLAW</span>
-              <span className="text-white/20 text-[7px] font-black">+</span>
-              <span className="text-[9px] text-[var(--color-neo-blue)] font-black tracking-wider">K2</span>
-            </div>
-            <span className="w-px h-4 bg-[var(--color-border)]" />
-            <span className="text-[9px] text-[var(--color-muted)] tracking-wider font-bold">{agents?.length || 6} AGENTS</span>
-          </div>
-          <div className="text-[8px] text-white/10 tracking-[0.3em] font-black">REAL-TIME AGENT OPERATIONS DASHBOARD</div>
-        </div>
-      </footer>
     </div>
   );
 }
 
-function SectionTitle({ icon, label, count }) {
+// Ultra Cyberpunk Section Header styles
+function SectionHeader({ icon, title, glowColor = "#00f0ff", glitch = false }) {
   return (
-    <div className="flex items-center gap-2.5 mb-3 font-mono">
-      <div className="flex items-center gap-2">
-        <span className="text-[14px]">{icon}</span>
-        <span className="text-[11px] font-black text-white tracking-[0.18em] uppercase">{label}</span>
+    <div className="relative px-4 py-2 border-b border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.02)] flex items-center gap-3">
+      <div className="absolute left-0 top-0 bottom-0 w-1" style={{ backgroundColor: glowColor, boxShadow: `0 0 10px ${glowColor}` }} />
+      <span className="text-[12px] opacity-80" style={{ color: glowColor, textShadow: `0 0 8px ${glowColor}80` }}>{icon}</span>
+      <h2 className={`font-orbitron font-black text-[11px] tracking-[0.25em] ${glitch ? 'animate-pulse' : ''}`}
+          style={{ color: glowColor, textShadow: `0 0 10px ${glowColor}50` }}>
+        {title}
+      </h2>
+      
+      {/* Decorative tech lines */}
+      <div className="flex-1 flex items-center justify-end gap-1 opacity-30">
+        <div className="h-[2px] w-2 bg-current" style={{ color: glowColor }} />
+        <div className="h-[2px] w-8 bg-current" style={{ color: glowColor }} />
+        <div className="h-[2px] w-1 bg-current" style={{ color: glowColor }} />
       </div>
-      {count != null && (
-        <span className="neo-badge text-[9px] tabular">{count}</span>
-      )}
-      <span className="flex-1 h-px bg-[var(--color-border)] border-t-2 border-dashed border-[var(--color-border)]" />
     </div>
+  );
+}
+
+function DecoCorners({ color = "#00f0ff", thickness = "1px" }) {
+  const size = "16px";
+  return (
+    <>
+      <div className="absolute top-0 left-0 pointer-events-none" style={{ width: size, height: size, borderTop: `${thickness} solid ${color}`, borderLeft: `${thickness} solid ${color}` }} />
+      <div className="absolute top-0 right-0 pointer-events-none" style={{ width: size, height: size, borderTop: `${thickness} solid ${color}`, borderRight: `${thickness} solid ${color}` }} />
+      <div className="absolute bottom-0 left-0 pointer-events-none" style={{ width: size, height: size, borderBottom: `${thickness} solid ${color}`, borderLeft: `${thickness} solid ${color}` }} />
+      <div className="absolute bottom-0 right-0 pointer-events-none" style={{ width: size, height: size, borderBottom: `${thickness} solid ${color}`, borderRight: `${thickness} solid ${color}` }} />
+    </>
   );
 }

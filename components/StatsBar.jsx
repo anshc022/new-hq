@@ -19,56 +19,75 @@ export default function StatsBar({ agents, nodeConnected }) {
   }, []);
 
   return (
-    <header className="sticky top-0 z-50 font-mono bg-bg border-b-[3px] border-[var(--color-border)]">
-      <div className="flex items-center justify-between px-5 py-3">
+    <header className="sticky top-0 z-50 font-mono"
+      style={{
+        background: 'rgba(3, 5, 15, 0.85)',
+        backdropFilter: 'blur(16px)',
+        borderBottom: '1px solid rgba(0, 240, 255, 0.12)',
+        boxShadow: '0 2px 20px rgba(0, 240, 255, 0.05)',
+      }}>
+      <div className="flex items-center justify-between px-5 py-2.5">
         {/* Logo */}
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-[var(--color-accent)] border-2 border-white flex items-center justify-center text-base font-black neo-shadow-sm">
-            ⚡
+          <div className="w-8 h-8 flex items-center justify-center relative">
+            <div className="absolute inset-0 border border-[var(--color-cyan)] opacity-60" style={{ clipPath: 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)' }} />
+            <span className="text-sm text-[var(--color-cyan)]">⚡</span>
           </div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-[16px] font-black tracking-[0.2em] text-white">OPS</span>
-            <span className="text-[10px] text-[var(--color-neo-yellow)] font-extrabold tracking-widest">HQ</span>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-[14px] font-orbitron font-bold tracking-[0.25em] text-[var(--color-cyan)]">OPS</span>
+            <span className="text-[9px] text-[var(--color-neon-green)] font-bold tracking-[0.2em]">HQ</span>
           </div>
-          <div className="hidden sm:flex items-center gap-1 ml-2 px-3 py-1 bg-[var(--color-surface)] border-2 border-[var(--color-border)] neo-shadow-sm">
-            <span className="text-[9px] text-[var(--color-neo-purple)] font-black tracking-wider">OPENCLAW</span>
-            <span className="text-white/30 text-[8px] font-black">+</span>
-            <span className="text-[9px] text-[var(--color-neo-blue)] font-black tracking-wider">K2</span>
+          <div className="hidden sm:flex items-center gap-1.5 ml-2 px-3 py-1 rounded-sm"
+            style={{ background: 'rgba(0, 240, 255, 0.04)', border: '1px solid rgba(0, 240, 255, 0.1)' }}>
+            <span className="text-[8px] text-[var(--color-cyan)] font-bold tracking-[0.2em] font-orbitron">OPENCLAW</span>
+            <span className="text-[var(--color-cyan)] text-[6px] opacity-30">◆</span>
+            <span className="text-[8px] text-[var(--color-neon-blue)] font-bold tracking-[0.2em]">K2</span>
           </div>
         </div>
 
         {/* Right side */}
-        <div className="flex items-center gap-3">
-          {/* Live */}
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-neo-green)] border-2 border-white neo-shadow-sm">
-            <span className="w-2 h-2 bg-black" style={{ animation: 'blink 1s step-end infinite' }} />
-            <span className="text-black text-[9px] font-black tracking-[0.2em]">LIVE</span>
+        <div className="flex items-center gap-2.5">
+          {/* Live indicator */}
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-sm"
+            style={{ background: 'rgba(0, 255, 136, 0.06)', border: '1px solid rgba(0, 255, 136, 0.25)' }}>
+            <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-neon-green)]"
+              style={{ animation: 'glow-pulse 2s ease-in-out infinite', boxShadow: '0 0 6px var(--color-neon-green)' }} />
+            <span className="text-[var(--color-neon-green)] text-[9px] font-bold tracking-[0.25em] font-orbitron">LIVE</span>
           </div>
 
           {/* Agent count */}
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-surface)] border-2 border-[var(--color-border)]">
-            <span className={`font-black text-base tabular ${active > 0 ? 'text-[var(--color-neo-green)]' : 'text-[var(--color-muted)]'}`}>{active}</span>
-            <span className="text-white/30 text-sm font-light">/</span>
-            <span className="text-white/70 text-sm tabular font-bold">{total}</span>
-            <span className="text-[var(--color-muted)] text-[8px] tracking-[0.2em] font-black">AGENTS</span>
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-sm"
+            style={{ background: 'rgba(0, 240, 255, 0.04)', border: '1px solid rgba(0, 240, 255, 0.1)' }}>
+            <span className={`font-bold text-sm tabular font-orbitron ${active > 0 ? 'text-[var(--color-neon-green)]' : 'text-white/30'}`}>{active}</span>
+            <span className="text-[var(--color-cyan)] text-xs opacity-30">/</span>
+            <span className="text-white/50 text-sm tabular font-bold">{total}</span>
+            <span className="text-white/20 text-[7px] tracking-[0.25em] font-bold ml-0.5">AGENTS</span>
           </div>
 
           {/* Node status */}
-          <div className={`flex items-center gap-2 px-3 py-1.5 border-2 neo-shadow-sm ${
-            nodeConnected
-              ? 'bg-[var(--color-neo-green)]/10 border-[var(--color-neo-green)] text-[var(--color-neo-green)]'
-              : 'bg-[var(--color-danger)]/10 border-[var(--color-danger)] text-[var(--color-danger)]'
-          }`}>
-            <span className={`w-2 h-2 ${nodeConnected ? 'bg-[var(--color-neo-green)]' : 'bg-[var(--color-danger)]'}`} />
-            <span className="text-[9px] font-black tracking-[0.15em]">NODE</span>
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-sm"
+            style={{
+              background: nodeConnected ? 'rgba(0, 255, 136, 0.04)' : 'rgba(255, 0, 102, 0.04)',
+              border: `1px solid ${nodeConnected ? 'rgba(0, 255, 136, 0.25)' : 'rgba(255, 0, 102, 0.25)'}`,
+            }}>
+            <span className="w-1.5 h-1.5 rounded-full"
+              style={{
+                background: nodeConnected ? 'var(--color-neon-green)' : 'var(--color-neon-pink)',
+                boxShadow: `0 0 4px ${nodeConnected ? 'var(--color-neon-green)' : 'var(--color-neon-pink)'}`,
+              }} />
+            <span className={`text-[9px] font-bold tracking-[0.2em] ${nodeConnected ? 'text-[var(--color-neon-green)]' : 'text-[var(--color-neon-pink)]'}`}>NODE</span>
           </div>
 
           {/* Clock */}
-          <div className="px-3 py-1.5 bg-[var(--color-surface)] border-2 border-[var(--color-border)]">
-            <span className="text-[var(--color-neo-blue)] text-[11px] tabular tracking-wider font-bold">{time}</span>
+          <div className="px-3 py-1.5 rounded-sm"
+            style={{ background: 'rgba(0, 240, 255, 0.04)', border: '1px solid rgba(0, 240, 255, 0.08)' }}>
+            <span className="text-[var(--color-cyan)] text-[11px] tabular tracking-wider font-mono font-bold opacity-70">{time}</span>
           </div>
         </div>
       </div>
+
+      {/* Scan line */}
+      <div className="scan-overlay" style={{ height: '1px', position: 'relative' }} />
     </header>
   );
 }
