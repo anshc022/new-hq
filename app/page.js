@@ -107,69 +107,70 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="h-screen w-screen overflow-hidden flex flex-col bg-[#020305] text-[#00f0ff] relative selection:bg-[#ff0066] selection:text-white">
+    <div className="h-screen w-screen overflow-hidden flex flex-col bg-[#050008] text-[#c400ff] relative selection:bg-[#ffcc00] selection:text-black">
       {/* Immersive HUD Overlays */}
       <div className="pointer-events-none absolute inset-0 z-0 bg-[url('/grid.svg')] opacity-10 background-repeat" />
       <div className="scan-overlay pointer-events-none absolute inset-0 z-50 mix-blend-overlay" />
       <div className="pointer-events-none absolute inset-0 shadow-[inset_0_0_150px_rgba(0,0,0,0.9)] z-40" />
 
       {/* Extreme Sci-Fi Top Bar */}
-      <div className="z-30 shrink-0 border-b border-[#00f0ff30] bg-[#03060c]/80 backdrop-blur-md pb-1 relative">
-        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1/3 h-[2px] bg-gradient-to-r from-transparent via-[#ff0066] to-transparent shadow-[0_0_10px_#ff0066]" />
+      <div className="z-30 shrink-0 border-b border-[#c400ff25] bg-[#06010c]/80 backdrop-blur-md pb-1 relative">
+        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1/3 h-[2px] bg-gradient-to-r from-transparent via-[#ffcc00] to-transparent shadow-[0_0_12px_#ffcc00]" />
         <StatsBar agents={agents} nodeConnected={nodeConnected} />
       </div>
 
       {/* Main Dashboard Layout - Full Screen Grid */}
-      <main className="flex-1 w-full mx-auto p-4 z-10 grid grid-cols-12 grid-rows-[1fr_minmax(250px,auto)] gap-4 overflow-hidden h-full max-w-[1920px]">
+      <main className="flex-1 w-full mx-auto p-3 z-10 grid grid-cols-12 grid-rows-[1fr_minmax(230px,auto)] gap-3 overflow-hidden h-full max-w-[1920px]">
         
-        {/* Left Column: Events & System */}
-        <section className="col-span-3 row-span-1 flex flex-col gap-4 overflow-hidden h-full animate-slide-right">
-          <div className="flex-1 flex flex-col min-h-0 bg-[#060c18]/60 border border-[#00f0ff30] rounded-sm relative overflow-hidden backdrop-blur-[3px] group shadow-[0_0_20px_rgba(0,240,255,0.05)_inset]">
-            <DecoCorners color="#00f0ff" />
-            <SectionHeader icon="⚡" title="LIVE TELEMETRY" glitch />
+        {/* Left Column: Live Events */}
+        <section className="col-span-2 row-span-1 flex flex-col gap-3 overflow-hidden h-full animate-slide-right">
+          <div className="flex-1 flex flex-col min-h-0 bg-[#0c0218]/60 border border-[#c400ff22] rounded-sm relative overflow-hidden backdrop-blur-[3px] shadow-[0_0_22px_rgba(196,0,255,0.05)_inset]">
+            <DecoCorners color="#ffcc00" />
+            <SectionHeader icon="⚡" title="TELEMETRY" glowColor="#ffcc00" glitch />
             <div className="flex-1 overflow-hidden p-1">
               <EventFeed events={events} />
             </div>
           </div>
         </section>
 
-        {/* Center: Stage Visualization */}
-        <section className="col-span-6 row-span-1 flex flex-col h-full bg-[#03060c]/40 border-[1px] border-[#ff006630] rounded-sm relative overflow-hidden backdrop-blur-sm animate-fade-in shadow-[0_0_40px_rgba(255,0,102,0.05)_inset]">
-          <div className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-[#ff0066] z-10" />
-          <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-[#ff0066] z-10" />
-          <SectionHeader icon="◈" title="CORE NEXUS TOPOLOGY" glowColor="#ff0066" />
-          <div className="flex-1 w-full h-full flex items-center justify-center relative P-2">
-             {/* Radial pulse background inside matrix */}
-             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80%] h-[80%] bg-[#ff0066] blur-[100px] opacity-[0.03] rounded-full pointer-events-none" />
+        {/* Center: Neural Map Visualization */}
+        <section className="col-span-8 row-span-1 flex flex-col h-full bg-[#04000c]/50 border border-[#c400ff28] rounded-sm relative overflow-hidden backdrop-blur-sm animate-fade-in shadow-[0_0_60px_rgba(196,0,255,0.07)_inset]">
+          <div className="absolute -top-1 -left-1 w-5 h-5 border-t-[2px] border-l-[2px] border-[#ffcc00] z-10" />
+          <div className="absolute -top-1 -right-1 w-5 h-5 border-t-[2px] border-r-[2px] border-[#ffcc00] z-10" />
+          <div className="absolute -bottom-1 -left-1 w-5 h-5 border-b-[2px] border-l-[2px] border-[#ffcc00] z-10" />
+          <div className="absolute -bottom-1 -right-1 w-5 h-5 border-b-[2px] border-r-[2px] border-[#ffcc00] z-10" />
+          <SectionHeader icon="◈" title="OPENCLAW · NEURAL MAP" glowColor="#c400ff" />
+          <div className="flex-1 w-full h-full flex items-stretch relative">
+             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[55%] h-[55%] bg-[#c400ff] blur-[120px] opacity-[0.035] rounded-full pointer-events-none" />
              <NodeGraph agents={agents} nodeConnected={nodeConnected} events={events} />
           </div>
         </section>
 
-        {/* Right Column: Mission Control */}
-        <section className="col-span-3 row-span-1 flex flex-col gap-4 overflow-hidden h-full animate-slide-left">
-          <div className="flex-1 flex flex-col min-h-0 bg-[#060c18]/60 border border-[#00f0ff30] rounded-sm relative overflow-hidden backdrop-blur-[3px] shadow-[0_0_20px_rgba(0,240,255,0.05)_inset]">
-            <DecoCorners color="#00f0ff" />
-            <SectionHeader icon="◆" title="COMMAND DIRECTIVE" />
+        {/* Right Column: Mission Control + System */}
+        <section className="col-span-2 row-span-1 flex flex-col gap-3 overflow-hidden h-full animate-slide-left">
+          <div className="flex-1 flex flex-col min-h-0 bg-[#0c0218]/60 border border-[#c400ff22] rounded-sm relative overflow-hidden backdrop-blur-[3px] shadow-[0_0_22px_rgba(196,0,255,0.05)_inset]">
+            <DecoCorners color="#ff00aa" />
+            <SectionHeader icon="◆" title="COMMAND" glowColor="#ff00aa" />
             <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 custom-scrollbar">
               <MissionBoard agents={agents} nodeConnected={nodeConnected} />
             </div>
           </div>
         </section>
 
-        {/* Bottom Bar: Working Agents & Chat logs side by side */}
-        <section className="col-span-12 row-span-1 grid grid-cols-12 gap-4 min-h-0 h-full animate-slide-up pb-2">
+        {/* Bottom Bar: Agent Fleet & Comms */}
+        <section className="col-span-12 row-span-1 grid grid-cols-12 gap-3 min-h-0 h-full animate-slide-up pb-2">
           
-          <div className="col-span-8 bg-[#0a1224]/80 border border-[#00ff8840] rounded-sm relative flex flex-col overflow-hidden backdrop-blur-sm shadow-[0_0_20px_rgba(0,255,136,0.05)_inset]">
-             <DecoCorners color="#00ff88" thickness="2px" />
-             <div className="absolute right-0 top-0 w-32 h-[1px] bg-gradient-to-r from-transparent to-[#00ff88]" />
+          <div className="col-span-8 bg-[#060014]/80 border border-[#ffcc0028] rounded-sm relative flex flex-col overflow-hidden backdrop-blur-sm shadow-[0_0_20px_rgba(255,204,0,0.04)_inset]">
+             <DecoCorners color="#ffcc00" thickness="2px" />
+             <div className="absolute right-0 top-0 w-24 h-[1px] bg-gradient-to-l from-transparent to-[#ffcc00] opacity-40" />
              <div className="flex-1 overflow-hidden">
                <AgentsWorking agents={agents} events={events} />
              </div>
           </div>
 
-          <div className="col-span-4 bg-[#0a0510]/80 border border-[#8800ff40] rounded-sm relative flex flex-col overflow-hidden backdrop-blur-sm shadow-[0_0_20px_rgba(136,0,255,0.05)_inset]">
-            <DecoCorners color="#8800ff" />
-            <SectionHeader icon="💬" title="COMM CHANNELS" glowColor="#8800ff" />
+          <div className="col-span-4 bg-[#060014]/80 border border-[#ff550028] rounded-sm relative flex flex-col overflow-hidden backdrop-blur-sm shadow-[0_0_20px_rgba(255,85,0,0.04)_inset]">
+            <DecoCorners color="#ff5500" />
+            <SectionHeader icon="💬" title="COMM CHANNELS" glowColor="#ff5500" />
             <div className="flex-1 overflow-hidden p-1 bg-[#020104]/50">
               <ChatLog messages={messages} />
             </div>
@@ -182,7 +183,7 @@ export default function Home() {
 }
 
 // Ultra Cyberpunk Section Header styles
-function SectionHeader({ icon, title, glowColor = "#00f0ff", glitch = false }) {
+function SectionHeader({ icon, title, glowColor = "#c400ff", glitch = false }) {
   return (
     <div className="relative px-4 py-2 border-b border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.02)] flex items-center gap-3">
       <div className="absolute left-0 top-0 bottom-0 w-1" style={{ backgroundColor: glowColor, boxShadow: `0 0 10px ${glowColor}` }} />
@@ -202,7 +203,7 @@ function SectionHeader({ icon, title, glowColor = "#00f0ff", glitch = false }) {
   );
 }
 
-function DecoCorners({ color = "#00f0ff", thickness = "1px" }) {
+function DecoCorners({ color = "#c400ff", thickness = "1px" }) {
   const size = "16px";
   return (
     <>

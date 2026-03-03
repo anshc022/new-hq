@@ -29,7 +29,7 @@ export default function ChatLog({ messages }) {
           <div key={msg.id || i}
             className="group flex items-start gap-2.5 px-3 py-2.5 hover:bg-white/[0.02] transition-colors"
             style={{
-              borderBottom: '1px solid rgba(0, 240, 255, 0.04)',
+              borderBottom: '1px solid rgba(196, 0, 255, 0.05)',
               borderLeft: '2px solid transparent',
             }}
             onMouseEnter={e => { e.currentTarget.style.borderLeftColor = cfg.color || 'var(--color-cyan)'; }}

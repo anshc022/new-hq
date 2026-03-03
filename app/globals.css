@@ -5,31 +5,31 @@
   --font-mono: 'JetBrains Mono', 'Geist Mono', ui-monospace, monospace;
   --font-hud: 'Orbitron', 'Rajdhani', sans-serif;
   --font-sans: 'Rajdhani', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --color-bg: #030508;
-  --color-surface: rgba(8, 14, 26, 0.85);
-  --color-card: rgba(10, 18, 32, 0.7);
-  --color-border: rgba(0, 240, 255, 0.12);
-  --color-accent: #00f0ff;
-  --color-accent-dim: rgba(0, 240, 255, 0.08);
-  --color-success: #00ff88;
-  --color-warning: #ffaa00;
-  --color-danger: #ff2244;
-  --color-muted: #3a5068;
-  --color-dim: #5a7a98;
-  --color-subtle: #8ab4d4;
-  --color-cyan: #00f0ff;
-  --color-neon-blue: #0088ff;
-  --color-neon-pink: #ff0066;
+  --color-bg: #050008;
+  --color-surface: rgba(12, 3, 20, 0.85);
+  --color-card: rgba(16, 4, 28, 0.7);
+  --color-border: rgba(196, 0, 255, 0.15);
+  --color-accent: #c400ff;
+  --color-accent-dim: rgba(196, 0, 255, 0.08);
+  --color-success: #00ffaa;
+  --color-warning: #ffcc00;
+  --color-danger: #ff2200;
+  --color-muted: #3d2050;
+  --color-dim: #6a3888;
+  --color-subtle: #b070d4;
+  --color-cyan: #c400ff;
+  --color-neon-blue: #ffcc00;
+  --color-neon-pink: #ff5500;
   --color-neon-yellow: #ffcc00;
-  --color-neon-green: #00ff88;
-  --color-neon-orange: #ff6600;
-  --color-neon-purple: #aa44ff;
-  --color-neo-blue: #4fc3f7;
-  --color-neo-pink: #f50057;
-  --color-neo-yellow: #ffea00;
-  --color-neo-green: #00e676;
-  --color-neo-orange: #ff9100;
-  --color-neo-purple: #7c4dff;
+  --color-neon-green: #00ffaa;
+  --color-neon-orange: #ff5500;
+  --color-neon-purple: #ff00aa;
+  --color-neo-blue: #c400ff;
+  --color-neo-pink: #ff00aa;
+  --color-neo-yellow: #ffcc00;
+  --color-neo-green: #00ffaa;
+  --color-neo-orange: #ff5500;
+  --color-neo-purple: #c400ff;
 }
 
 /* ── Base ── */
@@ -45,20 +45,20 @@ html, body {
 body {
   background: var(--color-bg);
   background-image:
-    radial-gradient(ellipse 120% 80% at 50% 0%, rgba(0, 120, 255, 0.06) 0%, transparent 70%),
-    radial-gradient(ellipse 80% 60% at 20% 100%, rgba(0, 240, 255, 0.03) 0%, transparent 60%),
-    radial-gradient(ellipse 80% 60% at 80% 100%, rgba(170, 68, 255, 0.03) 0%, transparent 60%);
+    radial-gradient(ellipse 120% 80% at 50% 0%, rgba(196, 0, 255, 0.07) 0%, transparent 70%),
+    radial-gradient(ellipse 80% 60% at 20% 100%, rgba(255, 0, 170, 0.04) 0%, transparent 60%),
+    radial-gradient(ellipse 80% 60% at 80% 100%, rgba(255, 204, 0, 0.03) 0%, transparent 60%);
 }
 
 ::selection {
-  background: var(--color-cyan);
-  color: #000;
+  background: #c400ff;
+  color: #fff;
 }
 
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(0, 240, 255, 0.2); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(0, 240, 255, 0.4); }
+::-webkit-scrollbar-thumb { background: rgba(196, 0, 255, 0.25); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(196, 0, 255, 0.5); border-radius: 4px; }
 
 /* ── Utilities ── */
 @layer utilities {
@@ -91,8 +91,8 @@ body {
 }
 
 @keyframes glow-pulse {
-  0%, 100% { box-shadow: 0 0 8px rgba(0, 240, 255, 0.3), inset 0 0 8px rgba(0, 240, 255, 0.05); }
-  50% { box-shadow: 0 0 20px rgba(0, 240, 255, 0.5), inset 0 0 15px rgba(0, 240, 255, 0.1); }
+  0%, 100% { box-shadow: 0 0 8px rgba(196, 0, 255, 0.35), inset 0 0 8px rgba(196, 0, 255, 0.06); }
+  50% { box-shadow: 0 0 24px rgba(196, 0, 255, 0.6), inset 0 0 18px rgba(196, 0, 255, 0.12); }
 }
 
 @keyframes scan-line {
@@ -117,10 +117,10 @@ body {
 
 /* ── HUD Glass Panels ── */
 .hud-panel {
-  background: rgba(6, 12, 24, 0.75);
-  border: 1px solid rgba(0, 240, 255, 0.15);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(10, 2, 18, 0.80);
+  border: 1px solid rgba(196, 0, 255, 0.18);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   position: relative;
   overflow: hidden;
 }
@@ -130,7 +130,7 @@ body {
   position: absolute;
   top: 0; left: 0; right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(0, 240, 255, 0.4), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255, 204, 0, 0.35), transparent);
 }
 
 .hud-panel::after {
@@ -138,16 +138,16 @@ body {
   position: absolute;
   top: 0; left: 0;
   width: 100%; height: 100%;
-  background: linear-gradient(180deg, rgba(0, 240, 255, 0.02) 0%, transparent 30%);
+  background: linear-gradient(180deg, rgba(196, 0, 255, 0.03) 0%, transparent 30%);
   pointer-events: none;
 }
 
 .hud-panel-accent {
-  background: rgba(6, 12, 24, 0.75);
-  border: 1px solid rgba(0, 240, 255, 0.25);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 0 15px rgba(0, 240, 255, 0.08), inset 0 0 30px rgba(0, 240, 255, 0.03);
+  background: rgba(10, 2, 18, 0.80);
+  border: 1px solid rgba(196, 0, 255, 0.30);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 0 18px rgba(196, 0, 255, 0.10), inset 0 0 35px rgba(196, 0, 255, 0.04);
 }
 
 /* ── HUD Badges ── */
@@ -176,8 +176,8 @@ body {
   position: absolute;
   top: 0; left: 0; right: 0;
   height: 2px;
-  background: linear-gradient(90deg, transparent, rgba(0, 240, 255, 0.3), transparent);
-  animation: scan-line 4s linear infinite;
+  background: linear-gradient(90deg, transparent, rgba(255, 204, 0, 0.35), rgba(196, 0, 255, 0.25), transparent);
+  animation: scan-line 5s linear infinite;
   pointer-events: none;
 }
 
@@ -190,7 +190,7 @@ body {
   content: '';
   position: absolute;
   width: 12px; height: 12px;
-  border-color: rgba(0, 240, 255, 0.5);
+  border-color: rgba(255, 204, 0, 0.55);
   border-style: solid;
   pointer-events: none;
 }
@@ -205,9 +205,9 @@ body {
 
 /* Legacy compat */
 .neo-card-static {
-  background: rgba(6, 12, 24, 0.75);
-  border: 1px solid rgba(0, 240, 255, 0.15);
-  backdrop-filter: blur(12px);
+  background: rgba(10, 2, 18, 0.80);
+  border: 1px solid rgba(196, 0, 255, 0.18);
+  backdrop-filter: blur(14px);
 }
 
 .neo-badge {
@@ -237,7 +237,7 @@ body {
 /* ── Grid background ── */
 .grid-bg {
   background-image:
-    linear-gradient(rgba(0, 240, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 240, 255, 0.03) 1px, transparent 1px);
+    linear-gradient(rgba(196, 0, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(196, 0, 255, 0.03) 1px, transparent 1px);
   background-size: 40px 40px;
 }

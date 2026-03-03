@@ -3,15 +3,15 @@ import { useMemo } from 'react';
 import { AGENTS } from '@/lib/agents';
 
 const STATUS_COLORS = {
-  idle: '#3a5068',
-  working: '#00ff88',
-  thinking: '#ffc800',
-  talking: '#00f0ff',
-  posting: '#e67e22',
-  researching: '#8800ff',
-  error: '#ff0066',
-  sleeping: '#2a3548',
-  monitoring: '#00ff88',
+  idle: '#3d2050',
+  working: '#00ffaa',
+  thinking: '#ffcc00',
+  talking: '#c400ff',
+  posting: '#ff5500',
+  researching: '#ff00aa',
+  error: '#ff2200',
+  sleeping: '#1a0525',
+  monitoring: '#00ffaa',
 };
 
 const STATUS_LABELS = {
@@ -49,28 +49,26 @@ export default function AgentsWorking({ agents, events }) {
       {/* Header Row */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-3 pb-0">
         <div className="flex items-center gap-3">
-          <div className="w-0.5 h-4 bg-[var(--color-cyan)]" style={{ boxShadow: '0 0 6px var(--color-cyan)' }} />
-          <h2 className="text-[11px] font-orbitron font-bold text-[var(--color-cyan)] tracking-[0.2em]">
-            AGENT STATUS
+          <div className="w-0.5 h-4 bg-[#c400ff]" style={{ boxShadow: '0 0 6px #c400ff' }} />
+          <h2 className="text-[11px] font-orbitron font-bold text-[#c400ff] tracking-[0.2em]">
+            AGENT FLEET
           </h2>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          {/* LIVE FEED badge */}
           <span className="flex items-center gap-1.5 px-2 py-1 rounded-sm text-[9px] font-bold tracking-[0.15em]"
-            style={{ background: 'rgba(0, 255, 136, 0.06)', border: '1px solid rgba(0, 255, 136, 0.2)', color: '#00ff88' }}>
-            <span className="w-1.5 h-1.5 rounded-full bg-[#00ff88]"
-              style={{ animation: 'glow-pulse 2s ease-in-out infinite', boxShadow: '0 0 4px #00ff88' }} />
+            style={{ background: 'rgba(0, 255, 170, 0.07)', border: '1px solid rgba(0, 255, 170, 0.22)', color: '#00ffaa' }}>
+            <span className="w-1.5 h-1.5 rounded-full bg-[#00ffaa]"
+              style={{ animation: 'glow-pulse 2s ease-in-out infinite', boxShadow: '0 0 4px #00ffaa' }} />
             LIVE
           </span>
-          {/* Signal count */}
           <span className="text-[10px] font-mono text-white/20">
-            <span className="text-[var(--color-cyan)] font-bold">{totalSignals}</span> signals
+            <span className="text-[#ffcc00] font-bold">{activeCount}</span>/{Object.keys(AGENTS).length} active · <span className="text-[#c400ff] font-bold">{totalSignals}</span> signals
           </span>
         </div>
       </div>
 
       {/* Divider */}
-      <div className="mx-4 my-2.5" style={{ height: '1px', background: 'linear-gradient(90deg, transparent, rgba(0, 240, 255, 0.1), transparent)' }} />
+      <div className="mx-4 my-2.5" style={{ height: '1px', background: 'linear-gradient(90deg, transparent, rgba(196, 0, 255, 0.15), transparent)' }} />
 
       {/* Agent Cards Row */}
       <div className="grid grid-cols-3 md:grid-cols-6 gap-2 px-4 pb-4">
@@ -81,14 +79,15 @@ export default function AgentsWorking({ agents, events }) {
           const statusLabel = STATUS_LABELS[status] || 'IDLE';
           const eventCount = agentEventCounts[name] || 0;
           const isBusy = status === 'working' || status === 'thinking' || status === 'talking' || status === 'posting' || status === 'researching';
+          const currentTask = agentData.current_task || null;
 
           return (
             <div key={name}
               className="flex flex-col items-center gap-1.5 p-3 rounded-sm transition-all duration-300"
               style={{
-                background: isBusy ? `${statusColor}08` : 'rgba(0, 240, 255, 0.02)',
-                border: `1px solid ${isBusy ? statusColor + '30' : 'rgba(0, 240, 255, 0.06)'}`,
-                boxShadow: isBusy ? `0 0 20px ${statusColor}10, inset 0 0 20px ${statusColor}05` : 'none',
+                background: isBusy ? `${statusColor}0c` : 'rgba(196, 0, 255, 0.02)',
+                border: `1px solid ${isBusy ? statusColor + '35' : 'rgba(196, 0, 255, 0.07)'}`,
+                boxShadow: isBusy ? `0 0 22px ${statusColor}12, inset 0 0 18px ${statusColor}06` : 'none',
               }}>
               {/* Avatar circle */}
               <div className="relative flex items-center justify-center"
@@ -114,6 +113,8 @@ export default function AgentsWorking({ agents, events }) {
                   }} />
               </div>
 
+              {/* Role */}
+              <span className="text-[7px] font-mono tracking-[0.12em] text-white/20 -mt-0.5">{config.role}</span>
               {/* Agent name */}
               <span className="text-[10px] font-orbitron font-bold tracking-[0.15em]"
                 style={{ color: isBusy ? config.color : `${config.color}80` }}>
@@ -126,10 +127,18 @@ export default function AgentsWorking({ agents, events }) {
                 {statusLabel}
               </span>
 
-              {/* Event count */}
-              <span className="text-[8px] font-mono text-white/15">
-                {eventCount} events
-              </span>
+              {/* Current task */}
+              {isBusy && currentTask ? (
+                <span className="text-[7px] font-mono text-center leading-tight px-1"
+                  style={{ color: 'rgba(255, 204, 0, 0.55)', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', width: '100%' }}
+                  title={currentTask}>
+                  {currentTask.length > 18 ? currentTask.slice(0, 18) + '…' : currentTask}
+                </span>
+              ) : (
+                <span className="text-[8px] font-mono text-white/12">
+                  {eventCount} events
+                </span>
+              )}
             </div>
           );
         })}
