@@ -6,8 +6,8 @@ import path from 'path';
 // ─── Config ───
 const GATEWAY_URL = process.env.GATEWAY_URL || 'ws://localhost:18789';
 const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || '';
-const BRIDGE_API = process.env.BRIDGE_API || 'https://hq.pranshuchourasia.in/api/gateway-bridge';
-const HEARTBEAT_API = process.env.HEARTBEAT_API || 'https://hq.pranshuchourasia.in/api/node-heartbeat';
+const BRIDGE_API = process.env.BRIDGE_API || 'http://localhost:4000/api/gateway-bridge';
+const HEARTBEAT_API = process.env.HEARTBEAT_API || 'http://localhost:4000/api/node-heartbeat';
 
 // Device identity for challenge-response auth
 const STATE_DIR = process.env.STATE_DIR || path.join(process.env.HOME || '/home/ubuntu', '.openclaw');
