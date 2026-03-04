@@ -22,7 +22,7 @@ const REL_LABELS = { spawns: 'SPAWNS', monitors: 'WATCHES', reviews: 'REVIEWS', 
 
 /* ── Force-directed simulation ────────────────────────────────── */
 function initForcePositions(W, H, agentList) {
-  const cx = W / 2, cy = H / 2, r = Math.min(W, H) * 0.30;
+  const cx = W / 2, cy = H / 2, r = Math.min(W, H) * 0.38;
   const nodes = {};
   agentList.forEach(([key], i) => {
     const angle = (i / agentList.length) * Math.PI * 2 - Math.PI / 2;
@@ -35,9 +35,9 @@ function initForcePositions(W, H, agentList) {
 function tickForce(nodes, edges, W, H, agentList) {
   const keys = Object.keys(nodes);
   const cx = W / 2, cy = H / 2;
-  const repulsion = 12000;
-  const attraction = 0.008;
-  const centerPull = 0.003;
+  const repulsion = 28000;
+  const attraction = 0.005;
+  const centerPull = 0.002;
   const dampening = 0.85;
   const dt = 1;
   const forces = {};
@@ -48,7 +48,7 @@ function tickForce(nodes, edges, W, H, agentList) {
       const a = nodes[keys[i]], b = nodes[keys[j]];
       let dx = b.x - a.x, dy = b.y - a.y;
       let dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      if (dist < 30) dist = 30;
+      if (dist < 60) dist = 60;
       const force = repulsion / (dist * dist);
       const fx = (dx / dist) * force, fy = (dy / dist) * force;
       forces[keys[i]].fx -= fx; forces[keys[i]].fy -= fy;
@@ -60,7 +60,7 @@ function tickForce(nodes, edges, W, H, agentList) {
     if (!a || !b) return;
     const dx = b.x - a.x, dy = b.y - a.y;
     const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-    const idealLen = 160 - (weight || 1) * 10;
+    const idealLen = 240 - (weight || 1) * 10;
     const force = attraction * (dist - idealLen);
     const fx = (dx / dist) * force, fy = (dy / dist) * force;
     forces[source].fx += fx; forces[source].fy += fy;
