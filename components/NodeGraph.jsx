@@ -22,13 +22,26 @@ const REL_LABELS = { spawns: 'SPAWNS', monitors: 'WATCHES', reviews: 'REVIEWS', 
 
 /* ── Force-directed simulation ────────────────────────────────── */
 function initForcePositions(W, H, agentList) {
-  const cx = W / 2, cy = H / 2, r = Math.min(W, H) * 0.38;
+  const cx = W / 2, cy = H / 2;
   const nodes = {};
-  agentList.forEach(([key], i) => {
-    const angle = (i / agentList.length) * Math.PI * 2 - Math.PI / 2;
-    nodes[key] = { x: cx + Math.cos(angle) * r, y: cy + Math.sin(angle) * r, vx: 0, vy: 0 };
+  // Echo goes to center; remaining agents split left/right for spacing
+  const others = agentList.filter(([key]) => key !== 'echo');
+  const leftGroup = others.slice(0, Math.ceil(others.length / 2));
+  const rightGroup = others.slice(Math.ceil(others.length / 2));
+  const spreadY = Math.min(H * 0.65, 400);
+  const offsetX = Math.min(W * 0.32, 320);
+
+  leftGroup.forEach(([key], i) => {
+    const yStep = spreadY / (leftGroup.length + 1);
+    nodes[key] = { x: cx - offsetX, y: cy - spreadY / 2 + yStep * (i + 1), vx: 0, vy: 0 };
   });
-  nodes['CORE'] = { x: cx, y: cy, vx: 0, vy: 0 };
+  rightGroup.forEach(([key], i) => {
+    const yStep = spreadY / (rightGroup.length + 1);
+    nodes[key] = { x: cx + offsetX, y: cy - spreadY / 2 + yStep * (i + 1), vx: 0, vy: 0 };
+  });
+  // Echo (main) at center
+  const echoEntry = agentList.find(([key]) => key === 'echo');
+  if (echoEntry) nodes['echo'] = { x: cx, y: cy, vx: 0, vy: 0 };
   return nodes;
 }
 
@@ -67,16 +80,18 @@ function tickForce(nodes, edges, W, H, agentList) {
     forces[target].fx -= fx; forces[target].fy -= fy;
   });
   agentList.forEach(([key]) => {
-    const n = nodes[key], c = nodes['CORE'];
-    if (!n || !c) return;
-    forces[key].fx += (c.x - n.x) * attraction * 0.6;
-    forces[key].fy += (c.y - n.y) * attraction * 0.6;
+    // Pull non-echo agents toward echo (center)
+    const n = nodes[key], c = nodes['echo'];
+    if (!n || !c || key === 'echo') return;
+    forces[key].fx += (c.x - n.x) * attraction * 0.4;
+    forces[key].fy += (c.y - n.y) * attraction * 0.4;
   });
   keys.forEach(k => {
     forces[k].fx += (cx - nodes[k].x) * centerPull;
     forces[k].fy += (cy - nodes[k].y) * centerPull;
   });
-  forces['CORE'] = { fx: (cx - nodes['CORE'].x) * 0.1, fy: (cy - nodes['CORE'].y) * 0.1 };
+  // Keep echo pinned to center
+  if (nodes['echo']) forces['echo'] = { fx: (cx - nodes['echo'].x) * 0.15, fy: (cy - nodes['echo'].y) * 0.15 };
   keys.forEach(k => {
     const n = nodes[k];
     n.vx = (n.vx + forces[k].fx * dt) * dampening;
@@ -279,42 +294,43 @@ export default function NodeGraph({ agents, relationships, nodeConnected, events
     for (let x = 0; x < W; x += spacing) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
     for (let y = 0; y < H; y += spacing) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
 
-    const corePos = pos['CORE'];
     const now = Date.now();
 
-    // ── Draw core → agent curved connections ──
-    agentList.forEach(([key, meta], idx) => {
-      const p = pos[key]; if (!p) return;
-      const liveData = agentMap[key] || agentMap[meta.id];
-      const st = getStatus(liveData);
-      const col = meta.color;
-      const isActive = st === 'active';
-      const curvature = 25 + (idx % 2 === 0 ? 15 : -15);
+    // ── Draw Echo → agent curved connections (Echo is the hub) ──
+    const echoPos = pos['echo'];
+    if (echoPos) {
+      agentList.forEach(([key, meta], idx) => {
+        if (key === 'echo') return; // skip self
+        const p = pos[key]; if (!p) return;
+        const liveData = agentMap[key] || agentMap[meta.id];
+        const st = getStatus(liveData);
+        const col = meta.color;
+        const isActive = st === 'active';
+        const curvature = 25 + (idx % 2 === 0 ? 15 : -15);
 
-      if (isActive) {
-        // Glow under the curve for active agents
-        const cp = getCurveControl(corePos.x, corePos.y, p.x, p.y, curvature);
-        ctx.save();
-        ctx.filter = 'blur(4px)';
-        ctx.strokeStyle = rgba(col, 0.18);
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.moveTo(corePos.x, corePos.y);
-        ctx.quadraticCurveTo(cp.cx, cp.cy, p.x, p.y);
-        ctx.stroke();
-        ctx.restore();
-      }
+        if (isActive) {
+          const cp = getCurveControl(echoPos.x, echoPos.y, p.x, p.y, curvature);
+          ctx.save();
+          ctx.filter = 'blur(4px)';
+          ctx.strokeStyle = rgba(col, 0.18);
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(echoPos.x, echoPos.y);
+          ctx.quadraticCurveTo(cp.cx, cp.cy, p.x, p.y);
+          ctx.stroke();
+          ctx.restore();
+        }
 
-      // Main core-to-agent curve
-      drawCurvedEdge(
-        ctx, corePos.x, corePos.y, p.x, p.y,
-        curvature, col,
-        isActive ? 0.35 : 0.08,
-        isActive ? 1.2 : 0.5,
-        isActive ? [6, 4] : [2, 8],
-        -(t * 0.35)
-      );
-    });
+        drawCurvedEdge(
+          ctx, echoPos.x, echoPos.y, p.x, p.y,
+          curvature, col,
+          isActive ? 0.35 : 0.08,
+          isActive ? 1.2 : 0.5,
+          isActive ? [6, 4] : [2, 8],
+          -(t * 0.35)
+        );
+      });
+    }
 
     // ── Draw relationship edges — curved lines with live communication ──
     // Determine which agents are currently active/working
@@ -410,13 +426,14 @@ export default function NodeGraph({ agents, relationships, nodeConnected, events
       }
     });
 
-    // ── Draw agent nodes ──
+    // ── Draw agent nodes ── (Echo drawn larger as hub)
     agentList.forEach(([key, meta]) => {
       const p = pos[key]; if (!p) return;
       const liveData = agentMap[key] || agentMap[meta.id];
       const st = getStatus(liveData);
       const col = meta.color;
-      const nodeR = 28;
+      const isEcho = key === 'echo';
+      const nodeR = isEcho ? 38 : 28;
 
       // Glow for active
       if (st === 'active') {
@@ -456,11 +473,11 @@ export default function NodeGraph({ agents, relationships, nodeConnected, events
       ctx.lineWidth = 0.8;
       ctx.beginPath(); ctx.arc(p.x, p.y, nodeR - 4, 0, Math.PI * 2); ctx.stroke();
 
-      // Icon
-      ctx.font = `${nodeR * 0.80}px serif`;
+      // Icon — use emoji-capable font stack to avoid ?? on Windows
+      ctx.font = `${nodeR * 0.80}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(meta.icon || '🤖', p.x, p.y - 2);
+      ctx.fillText(meta.icon || '🤖', p.x, p.y + 1);
 
       // Status dot
       ctx.fillStyle = '#0a0a0f';
@@ -515,42 +532,25 @@ export default function NodeGraph({ agents, relationships, nodeConnected, events
       }
     });
 
-    // ── CORE node ──
-    {
-      const p = corePos;
-      const coreR = 38;
-      ctx.save();
-      ctx.strokeStyle = rgba('#c400ff', 0.30); ctx.lineWidth = 1;
-      ctx.setLineDash([6, 4]); ctx.lineDashOffset = -(t * 0.2);
-      ctx.beginPath(); ctx.arc(p.x, p.y, coreR + 12, 0, Math.PI * 2); ctx.stroke();
-      ctx.restore();
-
-      const grd = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, coreR * 2.2);
-      grd.addColorStop(0, 'rgba(196,0,255,0.18)');
-      grd.addColorStop(1, 'rgba(196,0,255,0)');
-      ctx.fillStyle = grd;
-      ctx.beginPath(); ctx.arc(p.x, p.y, coreR * 2.2, 0, Math.PI * 2); ctx.fill();
-
-      ctx.save();
-      ctx.shadowColor = '#c400ff'; ctx.shadowBlur = 20;
-      ctx.fillStyle = 'rgba(10,10,15,0.95)';
-      ctx.beginPath(); ctx.arc(p.x, p.y, coreR, 0, Math.PI * 2); ctx.fill();
-      ctx.restore();
-
-      ctx.strokeStyle = 'rgba(196,0,255,0.70)'; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(p.x, p.y, coreR, 0, Math.PI * 2); ctx.stroke();
-      ctx.strokeStyle = 'rgba(196,0,255,0.25)'; ctx.lineWidth = 0.8;
-      ctx.beginPath(); ctx.arc(p.x, p.y, coreR - 8, 0, Math.PI * 2); ctx.stroke();
-
-      ctx.save();
-      ctx.shadowColor = '#c400ff'; ctx.shadowBlur = 8; ctx.fillStyle = '#c400ff';
-      ctx.font = 'bold 9px "Orbitron", monospace';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('OPENCLAW', p.x, p.y - 6);
-      ctx.fillStyle = 'rgba(255,255,255,0.60)';
-      ctx.font = '8px "JetBrains Mono", monospace';
-      ctx.fillText('CORE', p.x, p.y + 6);
-      ctx.restore();
+    // ── Echo "LEAD" badge (replaces old CORE node) ──
+    if (echoPos) {
+      const echoMeta = agentList.find(([k]) => k === 'echo');
+      if (echoMeta) {
+        const p = echoPos;
+        // Outer dashed orbit
+        ctx.save();
+        ctx.strokeStyle = rgba('#c400ff', 0.20); ctx.lineWidth = 1;
+        ctx.setLineDash([6, 4]); ctx.lineDashOffset = -(t * 0.2);
+        ctx.beginPath(); ctx.arc(p.x, p.y, 52, 0, Math.PI * 2); ctx.stroke();
+        ctx.restore();
+        // "LEAD" badge below label
+        ctx.save();
+        ctx.font = 'bold 7px "JetBrains Mono", monospace';
+        ctx.fillStyle = 'rgba(196,0,255,0.60)';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.fillText('◆ LEAD', p.x, p.y + 38 + 16 + 12);
+        ctx.restore();
+      }
     }
 
     // ── Legend ──
@@ -619,7 +619,6 @@ function drawMinimap(ctx, pos, W, H, edges, agentList) {
 
   const allX = [], allY = [];
   agentList.forEach(([key]) => { const p = pos[key]; if (p) { allX.push(p.x); allY.push(p.y); } });
-  const cp = pos['CORE']; if (cp) { allX.push(cp.x); allY.push(cp.y); }
   if (allX.length === 0) { ctx.restore(); return; }
   const minX = Math.min(...allX), maxX = Math.max(...allX);
   const minY = Math.min(...allY), maxY = Math.max(...allY);
@@ -645,14 +644,10 @@ function drawMinimap(ctx, pos, W, H, edges, agentList) {
 
   agentList.forEach(([key, meta]) => {
     const p = pos[key]; if (!p) return;
+    const isEcho = key === 'echo';
     ctx.fillStyle = rgba(meta.color, 0.65);
-    ctx.beginPath(); ctx.arc(toMx(p.x), toMy(p.y), 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(toMx(p.x), toMy(p.y), isEcho ? 4 : 2.5, 0, Math.PI * 2); ctx.fill();
   });
-
-  if (cp) {
-    ctx.fillStyle = 'rgba(196,0,255,0.70)';
-    ctx.beginPath(); ctx.arc(toMx(cp.x), toMy(cp.y), 3.5, 0, Math.PI * 2); ctx.fill();
-  }
 
   ctx.font = 'bold 7px "JetBrains Mono", monospace';
   ctx.fillStyle = 'rgba(255,255,255,0.25)';
