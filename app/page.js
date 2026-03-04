@@ -157,8 +157,79 @@ export default function Page() {
               <div className="flex-1 overflow-auto p-6" style={{ minHeight: 0 }}>
                 {view === 'GRID' && <AgentGrid agents={agents} activity={activity} relationships={relationships} />}
                 {view === 'NEURAL' && (
-                  <div style={{ width: '100%', height: '100%', minHeight: 480 }}>
-                    <NodeGraph agents={agents} relationships={relationships} nodeConnected={nodeConnected} events={events} activity={activity} />
+                  <div className="flex gap-4 h-full" style={{ minHeight: 480 }}>
+                    {/* Neural Map - left */}
+                    <div style={{ flex: '1 1 60%', minWidth: 0, height: '100%' }}>
+                      <NodeGraph agents={agents} relationships={relationships} nodeConnected={nodeConnected} events={events} activity={activity} />
+                    </div>
+                    {/* Live Logs - right */}
+                    <div style={{
+                      flex: '0 0 340px', maxWidth: 380, height: '100%',
+                      background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
+                      borderRadius: 10, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+                    }}>
+                      <div className="px-3 py-2 flex items-center gap-2" style={{
+                        borderBottom: '1px solid rgba(255,255,255,0.06)',
+                        background: 'rgba(196,0,255,0.04)', flexShrink: 0,
+                      }}>
+                        <span style={{ fontSize: 12 }}>📋</span>
+                        <span style={{ fontFamily: 'Orbitron, monospace', fontSize: 10, fontWeight: 700, letterSpacing: 2, color: 'rgba(255,255,255,0.50)', textTransform: 'uppercase' }}>
+                          Live Logs
+                        </span>
+                        <span style={{ marginLeft: 'auto', fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: 'rgba(255,255,255,0.25)' }}>
+                          {events.length + activity.length}
+                        </span>
+                      </div>
+                      <div className="flex-1 overflow-auto" style={{ minHeight: 0 }}>
+                        {[...events.map(e => ({ ...e, _type: 'event' })), ...activity.map(a => ({ ...a, _type: 'activity' }))]
+                          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+                          .slice(0, 150)
+                          .map((item, i) => {
+                            const isEvent = item._type === 'event';
+                            const agent = item.agent || '?';
+                            const typeIcon = isEvent
+                              ? { start: '🟢', complete: '✅', error: '🔴', task: '📋', message: '💬', tool: '🔧' }[item.event_type] || '⚡'
+                              : { start: '▶️', end: '⏹️', idle: '💤', active: '⚡', running: '🏃' }[item.status] || '📝';
+                            const text = isEvent
+                              ? item.title || item.event_type
+                              : item.task || item.detail || item.event_type || item.status;
+                            const time = item.created_at
+                              ? new Date(item.created_at).toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                              : '';
+
+                            return (
+                              <div key={`${item._type}-${item.id || i}`} className="px-3 py-1.5 flex items-start gap-2 hover:bg-white/[0.02] transition-colors"
+                                style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                                <span style={{ fontSize: 10, flexShrink: 0, marginTop: 2 }}>{typeIcon}</span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1.5">
+                                    <span style={{
+                                      fontFamily: 'JetBrains Mono, monospace', fontSize: 9, fontWeight: 700,
+                                      color: '#c400ff', textTransform: 'uppercase', letterSpacing: 0.5,
+                                    }}>{agent}</span>
+                                    <span style={{
+                                      fontFamily: 'JetBrains Mono, monospace', fontSize: 8,
+                                      color: 'rgba(255,255,255,0.20)',
+                                    }}>{time}</span>
+                                  </div>
+                                  <div style={{
+                                    fontSize: 11, color: 'rgba(255,255,255,0.50)',
+                                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                                    lineHeight: '1.3',
+                                  }}>
+                                    {typeof text === 'string' ? text.slice(0, 100) : String(text || '').slice(0, 100)}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        {events.length === 0 && activity.length === 0 && (
+                          <div className="py-8 text-center" style={{ color: 'rgba(255,255,255,0.20)', fontSize: 11 }}>
+                            No logs yet...
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 )}
                 {view === 'COMMAND' && <CommandView agents={agents} events={events} activity={activity} supabase={supabase} />}
