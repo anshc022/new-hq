@@ -1,531 +1,638 @@
-﻿'use client';
-import { useEffect, useRef, useMemo } from 'react';
-import { AGENTS } from '@/lib/agents';
+'use client';
+import { useEffect, useRef, useCallback, useMemo } from 'react';
+import { buildAgentList } from '@/lib/agents';
 
-const AGENT_LIST = Object.entries(AGENTS);
-const TWO_PI = Math.PI * 2;
+function hexRgb(hex) {
+  const h = (hex || '#888888').replace('#', '');
+  return { r: parseInt(h.slice(0,2),16), g: parseInt(h.slice(2,4),16), b: parseInt(h.slice(4,6),16) };
+}
+function rgba(hex, a) { const { r, g, b } = hexRgb(hex); return `rgba(${r},${g},${b},${a})`; }
 
-function wrap(str, maxW, ctx) {
-  if (!str) return [];
-  const words = str.split(' ');
-  const lines = [];
-  let cur = '';
-  for (const w of words) {
-    const test = cur ? cur + ' ' + w : w;
-    if (ctx.measureText(test).width > maxW && cur) {
-      lines.push(cur); cur = w;
-    } else { cur = test; }
-  }
-  if (cur) lines.push(cur);
-  return lines;
+function getStatus(a) {
+  const s = (a?.status || '').toLowerCase();
+  if (['active','working','thinking','talking','running'].includes(s)) return 'active';
+  if (['error','degraded'].includes(s)) return 'degraded';
+  if (['idle','sleeping'].includes(s)) return 'idle';
+  return 'unknown';
 }
 
-function truncate(str, n) { return str && str.length > n ? str.slice(0, n) + '...' : (str || ''); }
+const STATUS_COLORS = { active: '#22c55e', degraded: '#ef4444', idle: '#f59e0b', unknown: 'rgba(255,255,255,0.20)' };
+const REL_COLORS = { spawns: '#c400ff', monitors: '#ff5500', reviews: '#ffcc00', messages: '#00ffaa', depends_on: '#00aaff' };
+const REL_LABELS = { spawns: 'SPAWNS', monitors: 'WATCHES', reviews: 'REVIEWS', messages: 'TALKING', depends_on: 'DEPENDS' };
 
-function getPositions(W, H) {
+/* ── Force-directed simulation ────────────────────────────────── */
+function initForcePositions(W, H, agentList) {
+  const cx = W / 2, cy = H / 2, r = Math.min(W, H) * 0.30;
+  const nodes = {};
+  agentList.forEach(([key], i) => {
+    const angle = (i / agentList.length) * Math.PI * 2 - Math.PI / 2;
+    nodes[key] = { x: cx + Math.cos(angle) * r, y: cy + Math.sin(angle) * r, vx: 0, vy: 0 };
+  });
+  nodes['CORE'] = { x: cx, y: cy, vx: 0, vy: 0 };
+  return nodes;
+}
+
+function tickForce(nodes, edges, W, H, agentList) {
+  const keys = Object.keys(nodes);
+  const cx = W / 2, cy = H / 2;
+  const repulsion = 12000;
+  const attraction = 0.008;
+  const centerPull = 0.003;
+  const dampening = 0.85;
+  const dt = 1;
+  const forces = {};
+  keys.forEach(k => { forces[k] = { fx: 0, fy: 0 }; });
+
+  for (let i = 0; i < keys.length; i++) {
+    for (let j = i + 1; j < keys.length; j++) {
+      const a = nodes[keys[i]], b = nodes[keys[j]];
+      let dx = b.x - a.x, dy = b.y - a.y;
+      let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      if (dist < 30) dist = 30;
+      const force = repulsion / (dist * dist);
+      const fx = (dx / dist) * force, fy = (dy / dist) * force;
+      forces[keys[i]].fx -= fx; forces[keys[i]].fy -= fy;
+      forces[keys[j]].fx += fx; forces[keys[j]].fy += fy;
+    }
+  }
+  edges.forEach(({ source, target, weight }) => {
+    const a = nodes[source], b = nodes[target];
+    if (!a || !b) return;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    const idealLen = 160 - (weight || 1) * 10;
+    const force = attraction * (dist - idealLen);
+    const fx = (dx / dist) * force, fy = (dy / dist) * force;
+    forces[source].fx += fx; forces[source].fy += fy;
+    forces[target].fx -= fx; forces[target].fy -= fy;
+  });
+  agentList.forEach(([key]) => {
+    const n = nodes[key], c = nodes['CORE'];
+    if (!n || !c) return;
+    forces[key].fx += (c.x - n.x) * attraction * 0.6;
+    forces[key].fy += (c.y - n.y) * attraction * 0.6;
+  });
+  keys.forEach(k => {
+    forces[k].fx += (cx - nodes[k].x) * centerPull;
+    forces[k].fy += (cy - nodes[k].y) * centerPull;
+  });
+  forces['CORE'] = { fx: (cx - nodes['CORE'].x) * 0.1, fy: (cy - nodes['CORE'].y) * 0.1 };
+  keys.forEach(k => {
+    const n = nodes[k];
+    n.vx = (n.vx + forces[k].fx * dt) * dampening;
+    n.vy = (n.vy + forces[k].fy * dt) * dampening;
+    n.x += n.vx * dt;
+    n.y += n.vy * dt;
+    const margin = 50;
+    n.x = Math.max(margin, Math.min(W - margin, n.x));
+    n.y = Math.max(margin, Math.min(H - margin, n.y));
+  });
+}
+
+/* ── Sparkline for a node ────────────────────────────────────── */
+function drawSparkline(ctx, cx, cy, activityTimes, color, nodeR) {
+  if (!activityTimes || activityTimes.length === 0) return;
+  const now = Date.now();
+  const buckets = new Array(10).fill(0);
+  const bucketMs = 12 * 60000;
+  activityTimes.forEach(ts => {
+    const age = now - new Date(ts).getTime();
+    const idx = Math.floor(age / bucketMs);
+    if (idx >= 0 && idx < 10) buckets[9 - idx]++;
+  });
+  const max = Math.max(...buckets, 1);
+  const totalW = nodeR * 1.4;
+  const barW = totalW / 10;
+  const maxH = 8;
+  const startX = cx - totalW / 2;
+  const startY = cy + nodeR + 6;
+  buckets.forEach((v, i) => {
+    const bh = Math.max(0.5, (v / max) * maxH);
+    ctx.fillStyle = rgba(color, v > 0 ? 0.6 : 0.12);
+    ctx.fillRect(startX + i * barW + 0.5, startY + maxH - bh, barW - 1, bh);
+  });
+}
+
+/* ── Bezier curve helpers ────────────────────────────────────── */
+function getCurveControl(ax, ay, bx, by, curvature) {
+  const mx = (ax + bx) / 2, my = (ay + by) / 2;
+  const dx = bx - ax, dy = by - ay;
+  // Perpendicular offset for curve
+  const nx = -dy, ny = dx;
+  const len = Math.sqrt(nx * nx + ny * ny) || 1;
+  return { cx: mx + (nx / len) * curvature, cy: my + (ny / len) * curvature };
+}
+
+function getPointOnQuadBezier(ax, ay, cpx, cpy, bx, by, t) {
+  const u = 1 - t;
   return {
-    echo:  { x: W * 0.20, y: H * 0.40 },
-    flare: { x: W * 0.50, y: H * 0.40 },
-    bolt:  { x: W * 0.80, y: H * 0.40 },
-    nexus: { x: W * 0.20, y: H * 0.75 },
-    vigil: { x: W * 0.50, y: H * 0.75 },
-    forge: { x: W * 0.80, y: H * 0.75 },
-    CORE:  { x: W * 0.50, y: H * 0.12 },
+    x: u * u * ax + 2 * u * t * cpx + t * t * bx,
+    y: u * u * ay + 2 * u * t * cpy + t * t * by,
   };
 }
 
-const CONNECTIONS = [
-  ['CORE','echo'], ['CORE','flare'], ['CORE','bolt'],
-  ['echo','nexus'], ['flare','vigil'], ['bolt','forge'],
-  ['echo','flare'], ['flare','bolt'],
-  ['nexus','vigil'], ['vigil','forge'],
-  ['echo','vigil'], ['bolt','nexus'],
-];
-
-function hexRgb(hex) {
-  const h = hex.replace('#','');
-  return { r: parseInt(h.slice(0,2),16), g: parseInt(h.slice(2,4),16), b: parseInt(h.slice(4,6),16) };
-}
-function rgba(hex, a) {
-  const { r, g, b } = hexRgb(hex);
-  return `rgba(${r},${g},${b},${a.toFixed(3)})`;
+/* ── Draw a curved edge ──────────────────────────────────────── */
+function drawCurvedEdge(ctx, ax, ay, bx, by, curvature, color, alpha, lineW, dashPattern, dashOffset) {
+  const cp = getCurveControl(ax, ay, bx, by, curvature);
+  ctx.save();
+  ctx.strokeStyle = rgba(color, alpha);
+  ctx.lineWidth = lineW;
+  if (dashPattern) { ctx.setLineDash(dashPattern); ctx.lineDashOffset = dashOffset || 0; }
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.quadraticCurveTo(cp.cx, cp.cy, bx, by);
+  ctx.stroke();
+  ctx.restore();
+  return cp;
 }
 
-export default function NodeGraph({ agents, nodeConnected, events }) {
-  const canvasRef      = useRef(null);
-  const animRef        = useRef(null);
-  const timeRef        = useRef(0);
-  const particlesRef   = useRef([]);
-  const burstRef       = useRef([]);
-  const lastEvRef      = useRef(0);
-  const taskStartRef   = useRef({});  // { agentName: { task, startT } }
+/* ── Draw flowing particles along a curve ────────────────────── */
+function drawFlowParticles(ctx, ax, ay, cpx, cpy, bx, by, color, t, count) {
+  for (let i = 0; i < count; i++) {
+    const phase = ((t * 0.012) + i / count) % 1;
+    const pt = getPointOnQuadBezier(ax, ay, cpx, cpy, bx, by, phase);
+    const size = 2.5 + Math.sin(phase * Math.PI) * 1.5;
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = rgba(color, 0.85);
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* ── Draw bubble label on a curve ────────────────────────────── */
+function drawEdgeBubble(ctx, ax, ay, cpx, cpy, bx, by, label, color, alpha) {
+  const pt = getPointOnQuadBezier(ax, ay, cpx, cpy, bx, by, 0.5);
+  ctx.save();
+  ctx.font = 'bold 7px "JetBrains Mono", monospace';
+  const tw = ctx.measureText(label).width;
+  const px = 6, py = 4;
+  const bw = tw + px * 2, bh = 13;
+  const rx = pt.x - bw / 2, ry = pt.y - bh / 2;
+
+  // Bubble background
+  ctx.fillStyle = rgba(color, 0.22 * alpha);
+  roundRect(ctx, rx, ry, bw, bh, 4);
+  ctx.fill();
+  ctx.strokeStyle = rgba(color, 0.45 * alpha);
+  ctx.lineWidth = 0.6;
+  roundRect(ctx, rx, ry, bw, bh, 4);
+  ctx.stroke();
+
+  // Text
+  ctx.fillStyle = rgba(color, 0.90 * alpha);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, pt.x, pt.y);
+  ctx.restore();
+}
+
+/* ── Main component ──────────────────────────────────────────── */
+export default function NodeGraph({ agents, relationships, nodeConnected, events, activity }) {
+  const canvasRef = useRef(null);
+  const rafRef = useRef(null);
+  const frameRef = useRef(0);
+  const nodesRef = useRef(null);
+  const simStartRef = useRef(Date.now());
+
+  // Dynamic agent list — merges Supabase identity with static config
+  const agentList = useMemo(() => buildAgentList(agents), [agents]);
 
   const agentMap = useMemo(() => {
     const m = {};
-    (agents || []).forEach(a => { m[a.name] = a; });
+    agents.forEach(a => { m[a.name] = a; });
     return m;
   }, [agents]);
 
-  const recentEvents = useMemo(() => (events || []).slice(-20), [events]);
+  const agentActivityTimes = useMemo(() => {
+    const map = {};
+    (activity || []).forEach(a => {
+      if (!map[a.agent]) map[a.agent] = [];
+      map[a.agent].push(a.created_at);
+    });
+    return map;
+  }, [activity]);
 
-  useEffect(() => {
+  const edges = useMemo(() => (relationships || []).map(r => ({
+    source: r.source_agent,
+    target: r.target_agent,
+    type: r.relationship,
+    weight: r.weight || 1,
+    last_interaction_at: r.last_interaction_at || r.updated_at || r.created_at,
+  })), [relationships]);
+
+  const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    let running = true;
+    const W = canvas.width, H = canvas.height;
+    const t = frameRef.current;
 
-    const resize = () => {
-      const dpr = window.devicePixelRatio || 1;
-      const r   = canvas.getBoundingClientRect();
-      canvas.width  = r.width  * dpr;
-      canvas.height = r.height * dpr;
-      ctx.scale(dpr, dpr);
-    };
-    resize();
-    window.addEventListener('resize', resize);
+    if (!nodesRef.current) nodesRef.current = initForcePositions(W, H, agentList);
+    const age = Date.now() - simStartRef.current;
+    if (age < 8000) tickForce(nodesRef.current, edges, W, H, agentList);
+    const pos = nodesRef.current;
 
-    const bz = (t, x0, y0, x1, y1, x2, y2) => {
-      const m = 1 - t;
-      return { x: m*m*x0 + 2*m*t*x1 + t*t*x2, y: m*m*y0 + 2*m*t*y1 + t*t*y2 };
-    };
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#0a0a0f';
+    ctx.fillRect(0, 0, W, H);
 
-    const spawnP = (from, to, cpx, cpy, color, bright = 0.95) => {
-      particlesRef.current.push({
-        fx: from.x, fy: from.y, tx: to.x, ty: to.y,
-        cx: cpx, cy: cpy,
-        t: 0, speed: 0.009 + Math.random() * 0.016,
-        bright, size: 2.2 + Math.random() * 2.8, color,
-      });
-    };
+    // Grid
+    ctx.strokeStyle = 'rgba(255,255,255,0.025)';
+    ctx.lineWidth = 0.5;
+    const spacing = 40;
+    for (let x = 0; x < W; x += spacing) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+    for (let y = 0; y < H; y += spacing) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
 
-    const draw = () => {
-      if (!running) return;
-      const rect = canvas.getBoundingClientRect();
-      const W = rect.width, H = rect.height;
-      const t  = timeRef.current;
-      timeRef.current += 0.016;
+    const corePos = pos['CORE'];
+    const now = Date.now();
 
-      ctx.clearRect(0, 0, W, H);
-      const pos = getPositions(W, H);
-      const corePt = pos.CORE;
-      const cx = corePt.x, cy = corePt.y;
+    // ── Draw core → agent curved connections ──
+    agentList.forEach(([key, meta], idx) => {
+      const p = pos[key]; if (!p) return;
+      const liveData = agentMap[key] || agentMap[meta.id];
+      const st = getStatus(liveData);
+      const col = meta.color;
+      const isActive = st === 'active';
+      const curvature = 25 + (idx % 2 === 0 ? 15 : -15);
 
-      // ── Ambient background glow from active agents ──
-      AGENT_LIST.forEach(([name]) => {
-        const p = pos[name];
-        if (!p) return;
-        const d  = agentMap[name] || {};
-        const act = isActive((d.status||'').toLowerCase());
-        if (!act) return;
-        const col = AGENTS[name]?.color || '#ffffff';
-        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 120);
-        g.addColorStop(0, rgba(col, 0.12 + Math.sin(t*1.5+p.x)*0.04));
-        g.addColorStop(1, 'transparent');
-        ctx.beginPath(); ctx.arc(p.x, p.y, 120, 0, TWO_PI);
-        ctx.fillStyle = g; ctx.fill();
-      });
-
-      // ── Bright dot grid ──
-      const step = 32;
-      for (let gx = step/2; gx < W; gx += step) {
-        for (let gy = step/2; gy < H; gy += step) {
-          ctx.beginPath(); ctx.arc(gx, gy, 0.9, 0, TWO_PI);
-          ctx.fillStyle = 'rgba(255,255,255,0.13)'; ctx.fill();
-        }
+      if (isActive) {
+        // Glow under the curve for active agents
+        const cp = getCurveControl(corePos.x, corePos.y, p.x, p.y, curvature);
+        ctx.save();
+        ctx.filter = 'blur(4px)';
+        ctx.strokeStyle = rgba(col, 0.18);
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(corePos.x, corePos.y);
+        ctx.quadraticCurveTo(cp.cx, cp.cy, p.x, p.y);
+        ctx.stroke();
+        ctx.restore();
       }
 
-      // ── Tier separator lines ──
-      [0.40, 0.75].forEach((yPct, i) => {
-        const y = H * yPct;
-        ctx.beginPath(); ctx.moveTo(W*0.05, y); ctx.lineTo(W*0.95, y);
-        ctx.strokeStyle = 'rgba(255,255,255,0.12)';
-        ctx.lineWidth = 1; ctx.setLineDash([6,10]);
-        ctx.stroke(); ctx.setLineDash([]);
-        ctx.font = '600 8px JetBrains Mono, monospace';
-        ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(255,255,255,0.35)';
-        ctx.fillText(`TIER-${i+1}  ${i===0?'LEAD':'EXEC'} AGENTS`, W*0.05, H*yPct - 8);
-      });
+      // Main core-to-agent curve
+      drawCurvedEdge(
+        ctx, corePos.x, corePos.y, p.x, p.y,
+        curvature, col,
+        isActive ? 0.35 : 0.08,
+        isActive ? 1.2 : 0.5,
+        isActive ? [6, 4] : [2, 8],
+        -(t * 0.35)
+      );
+    });
 
-      // ── Detect new events → burst ──
-      if (recentEvents.length > lastEvRef.current) {
-        const newEvs = recentEvents.slice(lastEvRef.current);
-        newEvs.forEach(ev => {
-          const agentName = (ev.agent || '').toLowerCase();
-          const aCol = AGENTS[agentName]?.color || '#ffffff';
-          if (pos[agentName]) burstRef.current.push({ node: agentName, t: 0, color: aCol });
-          burstRef.current.push({ node: 'CORE', t: 0, color: '#ffffff' });
-        });
-        lastEvRef.current = recentEvents.length;
+    // ── Draw relationship edges — curved lines with live communication ──
+    // Determine which agents are currently active/working
+    const activeAgents = new Set();
+    agents.forEach(a => {
+      const st = getStatus(a);
+      if (st === 'active') activeAgents.add(a.name);
+    });
+
+    edges.forEach(({ source, target, type, weight, last_interaction_at }, ei) => {
+      const pa = pos[source], pb = pos[target];
+      if (!pa || !pb) return;
+
+      const sourceActive = activeAgents.has(source);
+      const targetActive = activeAgents.has(target);
+      const bothActive = sourceActive && targetActive;
+      const eitherActive = sourceActive || targetActive;
+      const edgeColor = REL_COLORS[type] || '#888888';
+
+      // Curvature: alternate direction to avoid overlapping edges
+      const curvature = (30 + weight * 8) * (ei % 2 === 0 ? 1 : -1);
+
+      // Recency fade
+      let recencyAlpha = 0.25;
+      if (last_interaction_at) {
+        const ageMs = now - new Date(last_interaction_at).getTime();
+        const ageHours = ageMs / 3600000;
+        recencyAlpha = Math.max(0.08, 0.45 - ageHours * 0.25);
       }
 
-      // ── Track task start times ──
-      AGENT_LIST.forEach(([name]) => {
-        const d = agentMap[name] || {};
-        const task = d.current_task || null;
-        const act  = isActive((d.status||'').toLowerCase());
-        const ts   = taskStartRef.current;
-        if (act && task) {
-          if (!ts[name] || ts[name].task !== task) {
-            ts[name] = { task, startT: t };
-          }
-        } else {
-          if (ts[name]) delete ts[name];
-        }
-      });
+      // Connection line opacity + width based on agent activity
+      let lineAlpha, lineW;
+      if (bothActive) {
+        // Both agents active → live communication line, bright + thick
+        lineAlpha = 0.75;
+        lineW = Math.min(3.5, 1.2 + weight * 0.2);
+      } else if (eitherActive) {
+        // One active → warm connection
+        lineAlpha = 0.40;
+        lineW = Math.min(2.5, 0.8 + weight * 0.15);
+      } else {
+        // Both idle → subtle ghost line
+        lineAlpha = recencyAlpha * 0.6;
+        lineW = 0.6;
+      }
 
-      // ── Draw connections ──
-      CONNECTIONS.forEach(([a, b]) => {
-        const pa = pos[a], pb = pos[b];
-        if (!pa || !pb) return;
-        const isCore = a === 'CORE' || b === 'CORE';
-        const agName = a === 'CORE' ? b : a;
-        const agCol  = AGENTS[agName]?.color || '#ffffff';
-        const aAct   = a === 'CORE' ? nodeConnected : isActive((agentMap[a]||{}).status);
-        const bAct   = b === 'CORE' ? nodeConnected : isActive((agentMap[b]||{}).status);
-        const either = aAct || bAct;
-        const both   = aAct && bAct;
-
-        const mx = (pa.x+pb.x)/2, my = (pa.y+pb.y)/2;
-        const cpx = mx + (isCore ? 0 : (pa.x < pb.x ? -22 : 22));
-        const cpy = my + (isCore ? (pb.y - pa.y)*0.28 : 0);
-
+      // Glow under line for active connections
+      if (bothActive) {
+        const cp = getCurveControl(pa.x, pa.y, pb.x, pb.y, curvature);
+        ctx.save();
+        ctx.filter = 'blur(5px)';
+        ctx.strokeStyle = rgba(edgeColor, 0.25);
+        ctx.lineWidth = lineW + 4;
         ctx.beginPath();
         ctx.moveTo(pa.x, pa.y);
-        ctx.quadraticCurveTo(cpx, cpy, pb.x, pb.y);
+        ctx.quadraticCurveTo(cp.cx, cp.cy, pb.x, pb.y);
+        ctx.stroke();
+        ctx.restore();
+      }
 
-        if (both) {
-          const gr = ctx.createLinearGradient(pa.x, pa.y, pb.x, pb.y);
-          gr.addColorStop(0, rgba(agCol, 0.90 + Math.sin(t*2.5)*0.08));
-          gr.addColorStop(0.5, rgba(agCol, 1.0));
-          gr.addColorStop(1, rgba(agCol, 0.70 + Math.sin(t*2.5)*0.08));
-          ctx.strokeStyle = gr; ctx.lineWidth = 3.0;
-        } else if (either) {
-          ctx.strokeStyle = rgba(agCol, 0.55); ctx.lineWidth = 1.8;
+      // Draw the curved edge
+      const cp = drawCurvedEdge(
+        ctx, pa.x, pa.y, pb.x, pb.y,
+        curvature, edgeColor, lineAlpha, lineW,
+        eitherActive ? [4 + weight, 4] : [2, 10],
+        -(t * (bothActive ? 0.5 : 0.2))
+      );
+
+      // ── Flowing particles for LIVE connections ──
+      if (bothActive) {
+        drawFlowParticles(ctx, pa.x, pa.y, cp.cx, cp.cy, pb.x, pb.y, edgeColor, t, 3);
+      } else if (eitherActive && type === 'messages') {
+        drawFlowParticles(ctx, pa.x, pa.y, cp.cx, cp.cy, pb.x, pb.y, edgeColor, t, 1);
+      }
+
+      // ── Bubble showing relationship type + task ──
+      if (eitherActive) {
+        const sourceData = agentMap[source];
+        const targetData = agentMap[target];
+        const activeData = sourceActive ? sourceData : targetData;
+        const task = activeData?.current_task;
+
+        if (bothActive) {
+          // Show relationship label + short task
+          const bubbleText = task
+            ? `${REL_LABELS[type] || type} · ${task.length > 18 ? task.slice(0, 18) + '…' : task}`
+            : REL_LABELS[type] || type;
+          drawEdgeBubble(ctx, pa.x, pa.y, cp.cx, cp.cy, pb.x, pb.y, bubbleText, edgeColor, 1.0);
         } else {
-          ctx.strokeStyle = rgba(agCol, 0.14); ctx.lineWidth = 0.9;
-          ctx.setLineDash([5,10]);
-        }
-        ctx.stroke(); ctx.setLineDash([]);
-
-        // Shadow/glow for active lines
-        if (both) {
-          ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.quadraticCurveTo(cpx, cpy, pb.x, pb.y);
-          ctx.strokeStyle = rgba(agCol, 0.25); ctx.lineWidth = 8; ctx.stroke();
-        }
-
-        if (either && Math.random() < (both ? 0.07 : 0.03)) {
-          const from = aAct ? pa : pb;
-          const to   = aAct ? pb : pa;
-          spawnP(from, to, cpx, cpy, agCol, both ? 1.0 : 0.75);
-        }
-      });
-
-      // ── Particles ──
-      particlesRef.current = particlesRef.current.filter(p => {
-        p.t += p.speed;
-        if (p.t >= 1) return false;
-        const pt   = bz(p.t, p.fx,p.fy, p.cx,p.cy, p.tx,p.ty);
-        const prev = bz(Math.max(0, p.t-0.08), p.fx,p.fy, p.cx,p.cy, p.tx,p.ty);
-        const fade = Math.sin(p.t * Math.PI);
-        const glowR = p.size * 4;
-        const grd = ctx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, glowR);
-        grd.addColorStop(0, rgba(p.color, fade * p.bright));
-        grd.addColorStop(1, 'transparent');
-        ctx.beginPath(); ctx.arc(pt.x, pt.y, glowR, 0, TWO_PI); ctx.fillStyle = grd; ctx.fill();
-        ctx.beginPath(); ctx.arc(pt.x, pt.y, p.size*(1-p.t*0.3), 0, TWO_PI);
-        ctx.fillStyle = rgba(p.color, Math.min(1, fade * p.bright * 1.2)); ctx.fill();
-        ctx.beginPath(); ctx.moveTo(prev.x, prev.y); ctx.lineTo(pt.x, pt.y);
-        ctx.strokeStyle = rgba(p.color, fade * p.bright * 0.6);
-        ctx.lineWidth = p.size * 0.7; ctx.stroke();
-        return true;
-      });
-
-      // ── Event bursts ──
-      burstRef.current = burstRef.current.filter(b => {
-        b.t += 0.016;
-        if (b.t >= 1) return false;
-        const np = pos[b.node]; if (!np) return false;
-        const fade = 1 - b.t;
-        for (let ri = 0; ri < 2; ri++) {
-          const r = 24 + (b.t + ri*0.2) * 80;
-          ctx.beginPath(); ctx.arc(np.x, np.y, r, 0, TWO_PI);
-          ctx.strokeStyle = rgba(b.color, fade * (ri===0 ? 0.7 : 0.3));
-          ctx.lineWidth = (3 - ri) * fade; ctx.stroke();
-        }
-        return true;
-      });
-
-      // ── CORE node ──
-      const cAlpha = nodeConnected ? 1.0 : 0.45;
-      if (nodeConnected) {
-        for (let pi = 0; pi < 4; pi++) {
-          const pf = ((t*0.45) + pi*0.25) % 1;
-          ctx.beginPath(); ctx.arc(cx, cy, 26+pf*65, 0, TWO_PI);
-          ctx.strokeStyle = `rgba(255,255,255,${(1-pf)*0.14*cAlpha})`;
-          ctx.lineWidth = 2; ctx.stroke();
+          // Just show the type
+          drawEdgeBubble(ctx, pa.x, pa.y, cp.cx, cp.cy, pb.x, pb.y, REL_LABELS[type] || type, edgeColor, 0.6);
         }
       }
-      // Strong outer ring
-      ctx.beginPath(); ctx.arc(cx, cy, 40, 0, TWO_PI);
-      ctx.strokeStyle = `rgba(255,255,255,${(0.55+Math.sin(t)*0.12)*cAlpha})`;
-      ctx.lineWidth = 2.0; ctx.stroke();
-      // Glow shadow
-      const cshadow = ctx.createRadialGradient(cx,cy,0,cx,cy,55);
-      cshadow.addColorStop(0, `rgba(255,255,255,${0.30*cAlpha})`);
-      cshadow.addColorStop(0.4,`rgba(255,255,255,${0.10*cAlpha})`);
-      cshadow.addColorStop(1, 'transparent');
-      ctx.beginPath(); ctx.arc(cx,cy,55,0,TWO_PI); ctx.fillStyle=cshadow; ctx.fill();
+    });
+
+    // ── Draw agent nodes ──
+    agentList.forEach(([key, meta]) => {
+      const p = pos[key]; if (!p) return;
+      const liveData = agentMap[key] || agentMap[meta.id];
+      const st = getStatus(liveData);
+      const col = meta.color;
+      const nodeR = 28;
+
+      // Glow for active
+      if (st === 'active') {
+        const grd = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, nodeR * 2.5);
+        grd.addColorStop(0, rgba(col, 0.22));
+        grd.addColorStop(1, rgba(col, 0));
+        ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(p.x, p.y, nodeR * 2.5, 0, Math.PI * 2); ctx.fill();
+      }
+
+      // Pulse ring for active
+      if (st === 'active') {
+        const phase = ((t * 16.67) % 600) / 600;
+        const pulseScale = 1 + 0.3 * (1 - phase * phase);
+        ctx.save();
+        ctx.strokeStyle = rgba(col, 0.25 * (1 - phase));
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(p.x, p.y, nodeR * pulseScale, 0, Math.PI * 2); ctx.stroke();
+        ctx.restore();
+      }
+
       // Node body
-      ctx.beginPath(); ctx.arc(cx,cy,27,0,TWO_PI);
-      ctx.fillStyle='#080808';
-      ctx.strokeStyle=`rgba(255,255,255,${0.95*cAlpha})`;
-      ctx.lineWidth=2.5; ctx.fill(); ctx.stroke();
-      // Hex
-      ctx.beginPath();
-      for(let i=0;i<6;i++){
-        const a=(i/6)*TWO_PI-Math.PI/6;
-        if(i===0) ctx.moveTo(cx+Math.cos(a)*12,cy+Math.sin(a)*12);
-        else       ctx.lineTo(cx+Math.cos(a)*12,cy+Math.sin(a)*12);
+      ctx.save();
+      ctx.shadowColor = col;
+      ctx.shadowBlur = st === 'active' ? 14 : 4;
+      ctx.fillStyle = 'rgba(10,10,15,0.92)';
+      ctx.beginPath(); ctx.arc(p.x, p.y, nodeR, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+
+      // Border with status color
+      const borderColor = STATUS_COLORS[st] || 'rgba(255,255,255,0.15)';
+      ctx.strokeStyle = rgba(borderColor, st === 'active' ? 0.70 : 0.30);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(p.x, p.y, nodeR, 0, Math.PI * 2); ctx.stroke();
+
+      // Inner color ring
+      ctx.strokeStyle = rgba(col, 0.18);
+      ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.arc(p.x, p.y, nodeR - 4, 0, Math.PI * 2); ctx.stroke();
+
+      // Icon
+      ctx.font = `${nodeR * 0.80}px serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(meta.icon || '🤖', p.x, p.y - 2);
+
+      // Status dot
+      ctx.fillStyle = '#0a0a0f';
+      ctx.beginPath(); ctx.arc(p.x + nodeR * 0.68, p.y + nodeR * 0.68, 5.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = STATUS_COLORS[st] || 'rgba(255,255,255,0.3)';
+      ctx.beginPath(); ctx.arc(p.x + nodeR * 0.68, p.y + nodeR * 0.68, 4, 0, Math.PI * 2); ctx.fill();
+
+      // Model badge
+      const model = liveData?.model || meta?.model || '';
+      if (model) {
+        const shortModel = model.replace('claude-', '').replace('gemini-', '').slice(0, 10);
+        ctx.save();
+        ctx.font = '7px "JetBrains Mono", monospace';
+        const tw = ctx.measureText(shortModel).width;
+        const bx = p.x - tw / 2 - 4, by = p.y - nodeR - 12;
+        ctx.fillStyle = 'rgba(196,0,255,0.18)';
+        roundRect(ctx, bx, by, tw + 8, 12, 3); ctx.fill();
+        ctx.fillStyle = 'rgba(200,136,255,0.80)';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(shortModel, p.x, by + 6);
+        ctx.restore();
       }
-      ctx.closePath();
-      ctx.strokeStyle=`rgba(255,255,255,${0.88*cAlpha})`; ctx.lineWidth=1.8; ctx.stroke();
-      ctx.beginPath(); ctx.arc(cx,cy,3.5,0,TWO_PI);
-      ctx.fillStyle=`rgba(255,255,255,${cAlpha})`; ctx.fill();
-      // Labels
-      ctx.font='700 10px Orbitron, sans-serif';
-      ctx.fillStyle=`rgba(255,255,255,${0.95*cAlpha})`;
-      ctx.textAlign='center';
-      ctx.fillText('OPENCLAW', cx, cy+46);
-      ctx.font='500 7.5px JetBrains Mono, monospace';
-      ctx.fillStyle=`rgba(255,255,255,${0.50*cAlpha})`;
-      ctx.fillText('CORE  GATEWAY', cx, cy+58);
-      ctx.font='700 8px JetBrains Mono, monospace';
-      ctx.fillStyle=nodeConnected?'rgba(74,222,128,1.0)':'rgba(248,113,113,0.95)';
-      ctx.fillText(nodeConnected?'  EC2 LIVE':'  EC2 OFFLINE', cx, cy+70);
 
-      // ── AGENT NODES ──
-      AGENT_LIST.forEach(([name]) => {
-        const p   = pos[name];
-        if (!p) return;
-        const d   = agentMap[name] || {};
-        const st  = (d.status||'idle').toLowerCase();
-        const act = isActive(st);
-        const err = st === 'error';
-        const col = AGENTS[name]?.color || '#ffffff';
-        const nodeR = 28;
-        const alpha = err ? 1.0 : act ? 1.0 : 0.38;
-        const ts    = taskStartRef.current[name];
+      // Label
+      const labelY = p.y + nodeR + 16;
+      ctx.save();
+      ctx.fillStyle = st === 'active' ? col : 'rgba(255,255,255,0.70)';
+      ctx.font = `bold 11px "JetBrains Mono", monospace`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText(meta.label, p.x, labelY);
+      ctx.restore();
 
-        // ── Ambient glow layer ──
-        if (act) {
-          const gBig = ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,nodeR+40);
-          gBig.addColorStop(0, rgba(col, 0.35+Math.sin(t*2+p.x)*0.08));
-          gBig.addColorStop(0.5, rgba(col, 0.12));
-          gBig.addColorStop(1, 'transparent');
-          ctx.beginPath(); ctx.arc(p.x,p.y,nodeR+40,0,TWO_PI); ctx.fillStyle=gBig; ctx.fill();
-        }
+      // Sparkline
+      drawSparkline(ctx, p.x, p.y + nodeR + 14, agentActivityTimes[key], col, nodeR);
 
-        // ── Outer pulsing ring ──
-        if (act) {
-          for (let ri=0; ri<2; ri++) {
-            const pr = nodeR + 8 + ri*8 + Math.sin(t*3+p.x+ri)*3;
-            ctx.beginPath(); ctx.arc(p.x,p.y,pr,0,TWO_PI);
-            ctx.strokeStyle=rgba(col, (0.5-ri*0.2)+Math.sin(t*2.8+p.x)*0.12);
-            ctx.lineWidth=2.0-ri*0.5; ctx.stroke();
-          }
-        }
-        if (err) {
-          ctx.beginPath(); ctx.arc(p.x,p.y,nodeR+7,0,TWO_PI);
-          ctx.strokeStyle=`rgba(248,113,113,${0.6+Math.sin(t*5)*0.2})`;
-          ctx.lineWidth=2; ctx.stroke();
-        }
+      // Task bubble under active agents
+      if (liveData?.current_task && st === 'active') {
+        const task = liveData.current_task.length > 30 ? liveData.current_task.slice(0, 30) + '…' : liveData.current_task;
+        ctx.save();
+        ctx.font = '9px "JetBrains Mono", monospace';
+        const tw = ctx.measureText(task).width;
+        const px2 = 8;
+        const bx = p.x - tw / 2 - px2, by = labelY + 30;
+        ctx.fillStyle = rgba(col, 0.18);
+        roundRect(ctx, bx, by, tw + px2 * 2, 17, 4); ctx.fill();
+        ctx.strokeStyle = rgba(col, 0.35); ctx.lineWidth = 0.8;
+        roundRect(ctx, bx, by, tw + px2 * 2, 17, 4); ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(task, p.x, by + 8.5);
+        ctx.restore();
+      }
+    });
 
-        // ── Node body ──
-        const bg = ctx.createRadialGradient(p.x-5,p.y-5,0,p.x,p.y,nodeR);
-        bg.addColorStop(0, rgba(col, act ? 0.28 : 0.06));
-        bg.addColorStop(0.6, rgba(col, act ? 0.10 : 0.02));
-        bg.addColorStop(1, 'rgba(0,0,0,0.95)');
-        ctx.beginPath(); ctx.arc(p.x,p.y,nodeR,0,TWO_PI);
-        ctx.fillStyle=bg;
-        ctx.strokeStyle=rgba(col, alpha*(act ? 1.0 : err ? 0.95 : 0.45));
-        ctx.lineWidth=act||err ? 3.0 : 1.5; ctx.fill(); ctx.stroke();
+    // ── CORE node ──
+    {
+      const p = corePos;
+      const coreR = 38;
+      ctx.save();
+      ctx.strokeStyle = rgba('#c400ff', 0.30); ctx.lineWidth = 1;
+      ctx.setLineDash([6, 4]); ctx.lineDashOffset = -(t * 0.2);
+      ctx.beginPath(); ctx.arc(p.x, p.y, coreR + 12, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
 
-        // ── TASK PROGRESS ARC ──
-        // Outer track
-        ctx.beginPath(); ctx.arc(p.x,p.y,nodeR+5,0,TWO_PI);
-        ctx.strokeStyle=rgba(col, 0.12); ctx.lineWidth=4; ctx.stroke();
-        // Progress fill
-        let prog = 0;
-        if (act && ts) {
-          const elapsed = t - ts.startT;
-          prog = Math.min(0.98, (elapsed % 120) / 120); // 120s cycle
-        } else if (act) {
-          prog = (t * 0.008) % 1;
-        }
-        if (act || prog > 0) {
-          const startA = -Math.PI/2;
-          const endA   = startA + prog * TWO_PI;
-          // Glow shadow behind arc
-          ctx.shadowColor = col;
-          ctx.shadowBlur  = 8;
-          ctx.beginPath(); ctx.arc(p.x,p.y,nodeR+5,startA,endA);
-          ctx.strokeStyle=rgba(col, act ? 1.0 : 0.40);
-          ctx.lineWidth=4; ctx.lineCap='round'; ctx.stroke();
-          ctx.lineCap='butt'; ctx.shadowBlur=0; ctx.shadowColor='transparent';
+      const grd = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, coreR * 2.2);
+      grd.addColorStop(0, 'rgba(196,0,255,0.18)');
+      grd.addColorStop(1, 'rgba(196,0,255,0)');
+      ctx.fillStyle = grd;
+      ctx.beginPath(); ctx.arc(p.x, p.y, coreR * 2.2, 0, Math.PI * 2); ctx.fill();
 
-          // Animated leading dot at arc tip
-          if (act) {
-            const dotX = p.x + Math.cos(endA) * (nodeR+5);
-            const dotY = p.y + Math.sin(endA) * (nodeR+5);
-            ctx.beginPath(); ctx.arc(dotX, dotY, 5, 0, TWO_PI);
-            ctx.fillStyle = col;
-            ctx.shadowColor = col; ctx.shadowBlur = 14;
-            ctx.fill(); ctx.shadowBlur=0; ctx.shadowColor='transparent';
-          }
-        }
+      ctx.save();
+      ctx.shadowColor = '#c400ff'; ctx.shadowBlur = 20;
+      ctx.fillStyle = 'rgba(10,10,15,0.95)';
+      ctx.beginPath(); ctx.arc(p.x, p.y, coreR, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
 
-        // ── Percent label inside arc ──
-        if (act) {
-          const pct = Math.round(prog * 100);
-          ctx.font = '700 8px JetBrains Mono, monospace';
-          ctx.textAlign = 'center';
-          ctx.fillStyle = rgba(col, 0.90);
-          ctx.fillText(`${pct}%`, p.x, p.y - nodeR - 12);
-        }
+      ctx.strokeStyle = 'rgba(196,0,255,0.70)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(p.x, p.y, coreR, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = 'rgba(196,0,255,0.25)'; ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.arc(p.x, p.y, coreR - 8, 0, Math.PI * 2); ctx.stroke();
 
-        // ── Icon ──
-        ctx.font='20px serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.globalAlpha=act?1.0:err?0.70:0.45;
-        ctx.shadowColor = act ? col : 'transparent';
-        ctx.shadowBlur  = act ? 10 : 0;
-        ctx.fillText(AGENTS[name]?.icon||'?', p.x, p.y);
-        ctx.globalAlpha=1; ctx.textBaseline='alphabetic';
-        ctx.shadowBlur=0; ctx.shadowColor='transparent';
+      ctx.save();
+      ctx.shadowColor = '#c400ff'; ctx.shadowBlur = 8; ctx.fillStyle = '#c400ff';
+      ctx.font = 'bold 9px "Orbitron", monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('OPENCLAW', p.x, p.y - 6);
+      ctx.fillStyle = 'rgba(255,255,255,0.60)';
+      ctx.font = '8px "JetBrains Mono", monospace';
+      ctx.fillText('CORE', p.x, p.y + 6);
+      ctx.restore();
+    }
 
-        // ── Labels ──
-        const ly = p.y + nodeR + 22;
-        // Name (bright + colored when active)
-        ctx.font = '700 10px Orbitron, sans-serif';
-        ctx.textAlign = 'center';
-        if (act) {
-          ctx.shadowColor = col; ctx.shadowBlur = 10;
-          ctx.fillStyle = col;
-        } else {
-          ctx.fillStyle = err ? '#f87171' : rgba(col, 0.45);
-        }
-        ctx.fillText(name.toUpperCase(), p.x, ly);
-        ctx.shadowBlur=0; ctx.shadowColor='transparent';
+    // ── Legend ──
+    ctx.save();
+    const lx = 16, ly = H - 90;
+    ctx.font = 'bold 8px "JetBrains Mono", monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.30)';
+    ctx.fillText('RELATIONSHIPS', lx, ly);
+    let row = 0;
+    Object.entries(REL_COLORS).forEach(([type, col]) => {
+      ctx.fillStyle = col;
+      ctx.fillRect(lx, ly + 12 + row * 13, 8, 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.40)';
+      ctx.font = '7px "JetBrains Mono", monospace';
+      ctx.fillText(type, lx + 14, ly + 14 + row * 13);
+      row++;
+    });
+    ctx.restore();
 
-        // Role
-        ctx.font='400 7px JetBrains Mono, monospace';
-        ctx.fillStyle=act?rgba(col,0.65):'rgba(255,255,255,0.25)';
-        ctx.fillText(AGENTS[name]?.role||'', p.x, ly+13);
+    // ── Minimap ──
+    drawMinimap(ctx, pos, W, H, edges, agentList);
 
-        // Status
-        ctx.font='700 8px JetBrains Mono, monospace';
-        ctx.fillStyle=err?'#f87171':act?rgba(col,1.0):'rgba(255,255,255,0.28)';
-        if (act) { ctx.shadowColor=col; ctx.shadowBlur=6; }
-        ctx.fillText(st.toUpperCase(), p.x, ly+26);
-        ctx.shadowBlur=0; ctx.shadowColor='transparent';
+  }, [agents, edges, agentMap, agentActivityTimes, agentList]);
 
-        // ── TASK DISPLAY (per agent) ──
-        if (act && d.current_task) {
-          const isEcho = name === 'echo';
-          // Background pill for task
-          const taskMaxW = isEcho ? 160 : 130;
-          ctx.font = isEcho ? '500 7.5px JetBrains Mono, monospace' : '400 6.5px JetBrains Mono, monospace';
-          const lines = wrap(d.current_task, taskMaxW, ctx);
-          const lineH = isEcho ? 11 : 10;
-          const boxH  = lines.length * lineH + 10;
-          const boxW  = taskMaxW + 16;
-          const bx    = p.x - boxW/2;
-          const by    = ly + 30;
+  const resize = useCallback(() => {
+    const c = canvasRef.current; if (!c) return;
+    const parent = c.parentElement;
+    c.width = parent.clientWidth; c.height = parent.clientHeight;
+    nodesRef.current = initForcePositions(c.width, c.height, agentList);
+    simStartRef.current = Date.now();
+  }, [agentList]);
 
-          ctx.beginPath();
-          ctx.roundRect(bx, by, boxW, boxH, 4);
-          ctx.fillStyle = rgba(col, isEcho ? 0.12 : 0.08);
-          ctx.strokeStyle = rgba(col, isEcho ? 0.50 : 0.30);
-          ctx.lineWidth = isEcho ? 1.5 : 1;
-          ctx.fill(); ctx.stroke();
+  useEffect(() => {
+    resize();
+    const ro = new ResizeObserver(resize);
+    if (canvasRef.current?.parentElement) ro.observe(canvasRef.current.parentElement);
+    return () => ro.disconnect();
+  }, [resize]);
 
-          lines.forEach((line, li) => {
-            ctx.font = isEcho ? '500 7.5px JetBrains Mono, monospace' : '400 6.5px JetBrains Mono, monospace';
-            ctx.fillStyle = isEcho ? rgba(col, 0.95) : rgba(col, 0.70);
-            ctx.textAlign = 'center';
-            ctx.fillText(line, p.x, by + 8 + li * lineH);
-          });
-
-          // Echo: also show "ASKING:" header
-          if (isEcho) {
-            ctx.font = '700 7px Orbitron, sans-serif';
-            ctx.fillStyle = rgba(col, 1.0);
-            ctx.shadowColor = col; ctx.shadowBlur = 8;
-            ctx.fillText('ASKING:', p.x, by - 6);
-            ctx.shadowBlur=0; ctx.shadowColor='transparent';
-          }
-
-          // Animated thinking dots for all active
-          const dots = '.'.repeat(1 + Math.floor((t * 2.5) % 3));
-          ctx.font='600 9px JetBrains Mono, monospace';
-          ctx.fillStyle=rgba(col,0.75);
-          ctx.fillText(dots, p.x + 4 + ctx.measureText(lines[lines.length-1]||'').width/2, by + (lines.length) * lineH + 1);
-        }
-
-        // ── Status dot (top-right) ──
-        const dotX = p.x + nodeR*0.72, dotY = p.y - nodeR*0.72;
-        ctx.beginPath(); ctx.arc(dotX, dotY, 5, 0, TWO_PI);
-        ctx.shadowColor = err?'#f87171':act?col:'transparent';
-        ctx.shadowBlur  = act||err ? 10 : 0;
-        ctx.fillStyle = err?'#f87171':act?col:'rgba(255,255,255,0.20)'; ctx.fill();
-        ctx.shadowBlur=0; ctx.shadowColor='transparent';
-        if (act) {
-          const pr2 = 5 + Math.sin(t*5+p.x)*2;
-          ctx.beginPath(); ctx.arc(dotX, dotY, pr2+4, 0, TWO_PI);
-          ctx.strokeStyle=rgba(col, 0.35+Math.sin(t*4)*0.15); ctx.lineWidth=1.5; ctx.stroke();
-        }
-      });
-
-      // ── HUD corners ──
-      ctx.strokeStyle='rgba(255,255,255,0.28)'; ctx.lineWidth=1.5;
-      const bl=20;
-      [[12,12,1,1],[W-12,12,-1,1],[12,H-12,1,-1],[W-12,H-12,-1,-1]].forEach(([x,y,sx,sy])=>{
-        ctx.beginPath(); ctx.moveTo(x,y+sy*bl); ctx.lineTo(x,y); ctx.lineTo(x+sx*bl,y); ctx.stroke();
-      });
-
-      // ── HUD footer ──
-      const timeStr = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
-      const activeCt = AGENT_LIST.filter(([n])=>isActive((agentMap[n]?.status||''))).length;
-      ctx.font='500 9px JetBrains Mono, monospace';
-      ctx.textAlign='left'; ctx.fillStyle='rgba(255,255,255,0.50)';
-      ctx.fillText(`T: ${timeStr}`, 20, H-16);
-      ctx.textAlign='right';
-      ctx.fillStyle=activeCt>0?'rgba(74,222,128,1.0)':'rgba(255,255,255,0.35)';
-      if(activeCt>0){ctx.shadowColor='#4ade80';ctx.shadowBlur=8;}
-      ctx.fillText(`${activeCt}/${AGENT_LIST.length} ACTIVE`, W-20, H-16);
-      ctx.shadowBlur=0; ctx.shadowColor='transparent';
-      ctx.font='400 8px JetBrains Mono, monospace';
-      ctx.fillStyle='rgba(255,255,255,0.28)';
-      ctx.fillText('OPENCLAW  COMMAND TOPOLOGY', W-20, 20);
-
-      animRef.current = requestAnimationFrame(draw);
-    };
-
-    draw();
-    return () => {
-      running = false;
-      if (animRef.current) cancelAnimationFrame(animRef.current);
-      window.removeEventListener('resize', resize);
-    };
-  }, [agentMap, nodeConnected, recentEvents]);
+  useEffect(() => {
+    let running = true;
+    const loop = () => { if (!running) return; frameRef.current++; draw(); rafRef.current = requestAnimationFrame(loop); };
+    rafRef.current = requestAnimationFrame(loop);
+    return () => { running = false; cancelAnimationFrame(rafRef.current); };
+  }, [draw]);
 
   return (
-    <div className="relative w-full h-full min-h-[360px]">
-      <canvas ref={canvasRef} className="w-full h-full" style={{ display: 'block' }} />
-    </div>
+    <canvas ref={canvasRef} className="w-full h-full"
+      style={{ display: 'block' }} />
   );
 }
 
-function isActive(s) {
-  const v = (s||'').toLowerCase();
-  return v==='working'||v==='thinking'||v==='talking'||v==='posting'||v==='researching'||v==='monitoring';
+/* ── Minimap ─────────────────────────────────────────────────── */
+function drawMinimap(ctx, pos, W, H, edges, agentList) {
+  const mW = 120, mH = 80;
+  const mx = W - mW - 16, my = H - mH - 16;
+  const pad = 8;
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(10,10,15,0.85)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+  ctx.lineWidth = 1;
+  roundRect(ctx, mx, my, mW, mH, 4); ctx.fill(); ctx.stroke();
+
+  const allX = [], allY = [];
+  agentList.forEach(([key]) => { const p = pos[key]; if (p) { allX.push(p.x); allY.push(p.y); } });
+  const cp = pos['CORE']; if (cp) { allX.push(cp.x); allY.push(cp.y); }
+  if (allX.length === 0) { ctx.restore(); return; }
+  const minX = Math.min(...allX), maxX = Math.max(...allX);
+  const minY = Math.min(...allY), maxY = Math.max(...allY);
+  const rangeX = maxX - minX || 1, rangeY = maxY - minY || 1;
+  const scaleX = (mW - pad * 2) / rangeX, scaleY = (mH - pad * 2) / rangeY;
+  const scale = Math.min(scaleX, scaleY);
+  const toMx = (x) => mx + pad + (x - minX) * scale;
+  const toMy = (y) => my + pad + (y - minY) * scale;
+
+  // Curved edges in minimap
+  edges.forEach(({ source, target, type }, ei) => {
+    const pa = pos[source], pb = pos[target];
+    if (!pa || !pb) return;
+    const curv = 6 * (ei % 2 === 0 ? 1 : -1);
+    const cpc = getCurveControl(toMx(pa.x), toMy(pa.y), toMx(pb.x), toMy(pb.y), curv);
+    ctx.strokeStyle = rgba(REL_COLORS[type] || '#888', 0.25);
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(toMx(pa.x), toMy(pa.y));
+    ctx.quadraticCurveTo(cpc.cx, cpc.cy, toMx(pb.x), toMy(pb.y));
+    ctx.stroke();
+  });
+
+  agentList.forEach(([key, meta]) => {
+    const p = pos[key]; if (!p) return;
+    ctx.fillStyle = rgba(meta.color, 0.65);
+    ctx.beginPath(); ctx.arc(toMx(p.x), toMy(p.y), 2.5, 0, Math.PI * 2); ctx.fill();
+  });
+
+  if (cp) {
+    ctx.fillStyle = 'rgba(196,0,255,0.70)';
+    ctx.beginPath(); ctx.arc(toMx(cp.x), toMy(cp.y), 3.5, 0, Math.PI * 2); ctx.fill();
+  }
+
+  ctx.font = 'bold 7px "JetBrains Mono", monospace';
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.textAlign = 'right';
+  ctx.fillText('MINIMAP', mx + mW - 6, my + 10);
+  ctx.restore();
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }

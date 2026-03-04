@@ -5,6 +5,46 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// ─── Activity log helper: writes to agent_activity table ─────
+// Called whenever an agent changes status so the command center has a full timeline.
+async function logActivity(agent, event_type, status, task, detail) {
+  try {
+    await supabase.from('agent_activity').insert({
+      agent,
+      event_type,
+      status,
+      task: task ? String(task).slice(0, 120) : null,
+      detail: detail ? String(detail).slice(0, 255) : null,
+    });
+  } catch (_) { /* non-critical — do not break main flow */ }
+}
+
+// ─── Relationship tracker: increments edge weight ────────────
+async function trackRelationship(source, target, relationship) {
+  try {
+    const { data: existing } = await supabase
+      .from('agent_relationships')
+      .select('id, interaction_count, weight')
+      .eq('source_agent', source)
+      .eq('target_agent', target)
+      .eq('relationship', relationship)
+      .single();
+
+    if (existing) {
+      await supabase.from('agent_relationships').update({
+        interaction_count: (existing.interaction_count || 0) + 1,
+        weight: Math.min(5.0, (existing.weight || 1.0) + 0.05),
+        last_interaction_at: new Date().toISOString(),
+      }).eq('id', existing.id);
+    } else {
+      await supabase.from('agent_relationships').insert({
+        source_agent: source, target_agent: target, relationship,
+        weight: 1.0, interaction_count: 1,
+      });
+    }
+  } catch (_) { /* non-critical */ }
+}
+
 // ─── Agent ID mapping (gateway agentId → display name) ───
 // V2: Names = IDs (except main → echo)
 const AGENT_MAP = {
@@ -88,6 +128,12 @@ async function detectNativeSpawn(sourceAgent, toolName, toolData) {
         event_type: 'task',
         title: `${sourceAgent} spawned: ${task.slice(0, 50)}`,
       });
+
+      // Activity log + relationship tracking
+      await logActivity(displayName, 'task_start', 'thinking',
+        `${sourceAgent} → ${displayName}: ${task.slice(0, 55)}`,
+        `Spawned by ${sourceAgent}`);
+      await trackRelationship(sourceAgent, displayName, 'spawns');
     }
     return;
   }
@@ -105,6 +151,9 @@ async function detectNativeSpawn(sourceAgent, toolName, toolData) {
           current_room: getWorkRoom(displayName),
           last_active_at: new Date().toISOString(),
         }).eq('name', displayName);
+        await logActivity(displayName, 'message', 'thinking',
+          `Message from ${sourceAgent}: ${msg.slice(0, 45)}`, null);
+        await trackRelationship(sourceAgent, displayName, 'messages');
       }
     }
     return;
@@ -142,6 +191,8 @@ async function detectNativeSpawn(sourceAgent, toolName, toolData) {
       event_type: 'task',
       title: `${sourceAgent} → Node: ${preview}`,
     });
+    await logActivity('forge', 'task_start', 'working', `Node exec: ${preview}`, `Triggered by ${sourceAgent}`);
+    if (sourceAgent !== 'forge') await trackRelationship(sourceAgent, 'forge', 'depends_on');
   }
 }
 
@@ -231,6 +282,7 @@ async function detectDelegationFromText(text) {
           event_type: 'system',
           title: `Completed: ${cleanMsg.slice(0, 60)}`,
         });
+        await logActivity(displayName, 'task_end', 'talking', `Done: ${cleanMsg}`, 'Task completed');
 
         activeAgents.set(displayName, { startedAt: Date.now(), runId: null });
         delegatedAgents.delete(displayName);
@@ -251,6 +303,8 @@ async function detectDelegationFromText(text) {
           event_type: 'task',
           title: `Echo delegated: ${cleanTask.slice(0, 60)}`,
         });
+        await logActivity(displayName, 'task_start', 'working', cleanTask, 'Delegated by Echo');
+        await trackRelationship('echo', displayName, 'spawns');
 
         activeAgents.set(displayName, { startedAt: Date.now(), runId: null });
         delegationTracker.set(displayName, { delegatedAt: Date.now(), task: cleanTask });
