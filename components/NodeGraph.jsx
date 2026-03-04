@@ -1,42 +1,34 @@
 'use client';
 import { useEffect, useRef, useMemo } from 'react';
-import { AGENTS, STATUS_VISUALS } from '@/lib/agents';
+import { AGENTS } from '@/lib/agents';
 
 const AGENT_LIST = Object.entries(AGENTS);
 const TWO_PI = Math.PI * 2;
 
-function truncate(str, len) {
-  if (!str) return '';
-  return str.length > len ? str.slice(0, len) + '…' : str;
-}
+function truncate(str, n) { return str && str.length > n ? str.slice(0, n) + 'Ã¢â‚¬Â¦' : (str || ''); }
 
-function getAgentPositions(cx, cy, radius) {
-  const positions = {};
+function getPositions(cx, cy, r) {
+  const p = {};
   AGENT_LIST.forEach(([name], i) => {
-    const angle = (i / AGENT_LIST.length) * TWO_PI - Math.PI / 2;
-    positions[name] = {
-      x: cx + Math.cos(angle) * radius,
-      y: cy + Math.sin(angle) * radius,
-      angle,
-    };
+    const a = (i / AGENT_LIST.length) * TWO_PI - Math.PI / 2;
+    p[name] = { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r, angle: a };
   });
-  return positions;
+  return p;
 }
 
-// Connection pairs (agent-to-agent neural links)
 const CONNECTIONS = [
-  ['echo', 'flare'], ['echo', 'bolt'], ['echo', 'nexus'],
-  ['echo', 'vigil'], ['echo', 'forge'],
-  ['flare', 'bolt'], ['nexus', 'vigil'], ['bolt', 'nexus'],
-  ['vigil', 'forge'], ['forge', 'flare'],
+  ['echo','flare'],['echo','bolt'],['echo','nexus'],
+  ['echo','vigil'],['echo','forge'],
+  ['flare','bolt'],['nexus','vigil'],['bolt','nexus'],
+  ['vigil','forge'],['forge','flare'],
 ];
 
 export default function NodeGraph({ agents, nodeConnected, events }) {
-  const canvasRef = useRef(null);
-  const animRef = useRef(null);
-  const timeRef = useRef(0);
-  const particlesRef = useRef([]);
-  const radarRef = useRef(0);
+  const canvasRef   = useRef(null);
+  const animRef     = useRef(null);
+  const timeRef     = useRef(0);
+  const radarRef    = useRef(0);
+  const particlesRef= useRef([]);
 
   const agentMap = useMemo(() => {
     const m = {};
@@ -54,386 +46,337 @@ export default function NodeGraph({ agents, nodeConnected, events }) {
 
     const resize = () => {
       const dpr = window.devicePixelRatio || 1;
-      const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
+      const r   = canvas.getBoundingClientRect();
+      canvas.width  = r.width  * dpr;
+      canvas.height = r.height * dpr;
       ctx.scale(dpr, dpr);
     };
     resize();
     window.addEventListener('resize', resize);
 
-    // Bezier helper
-    const bezierPoint = (t, x0, y0, x1, y1, x2, y2) => {
-      const mt = 1 - t;
-      return {
-        x: mt * mt * x0 + 2 * mt * t * x1 + t * t * x2,
-        y: mt * mt * y0 + 2 * mt * t * y1 + t * t * y2,
-      };
+    const bz = (t, x0, y0, x1, y1, x2, y2) => {
+      const m = 1 - t;
+      return { x: m*m*x0 + 2*m*t*x1 + t*t*x2, y: m*m*y0 + 2*m*t*y1 + t*t*y2 };
     };
 
-    // Spawn data particles trailing along bezier
-    const spawnParticle = (from, to, color, bcx, bcy) => {
+    const spawnP = (from, to, bcx, bcy, bright) => {
       particlesRef.current.push({
-        fx: from.x, fy: from.y,
-        tx: to.x, ty: to.y,
-        cx: bcx !== undefined ? bcx : (from.x + to.x) / 2,
-        cy: bcy !== undefined ? bcy : (from.y + to.y) / 2,
-        t: 0, speed: 0.006 + Math.random() * 0.011,
-        color, size: 2 + Math.random() * 2.5,
+        fx: from.x, fy: from.y, tx: to.x, ty: to.y,
+        cx: bcx, cy: bcy,
+        t: 0, speed: 0.007 + Math.random() * 0.012,
+        bright: bright ?? 0.7, size: 1.5 + Math.random() * 2,
       });
     };
 
     const draw = () => {
       if (!running) return;
       const rect = canvas.getBoundingClientRect();
-      const w = rect.width;
-      const h = rect.height;
-      const cx = w / 2;
-      const cy = h / 2 + 5;
-      const radius = Math.min(w, h) * 0.30;
-      const now = timeRef.current;
+      const W = rect.width, H = rect.height;
+      const cx = W / 2, cy = H / 2 + 4;
+      const R  = Math.min(W, H) * 0.295;
+      const t  = timeRef.current;
       timeRef.current += 0.016;
-      radarRef.current = (radarRef.current + 0.008) % TWO_PI;
+      radarRef.current = (radarRef.current + 0.007) % TWO_PI;
 
-      ctx.clearRect(0, 0, w, h);
-      const positions = getAgentPositions(cx, cy, radius);
+      ctx.clearRect(0, 0, W, H);
 
-      // ── Deep space radial bg ──
-      const bgGrd = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius * 2.2);
-      bgGrd.addColorStop(0, 'rgba(28, 0, 48, 0.18)');
-      bgGrd.addColorStop(0.5, 'rgba(8, 0, 16, 0.08)');
-      bgGrd.addColorStop(1, 'transparent');
-      ctx.fillStyle = bgGrd;
-      ctx.fillRect(0, 0, w, h);
+      const pos = getPositions(cx, cy, R);
 
-      // ── Orbital rings with tick marks ──
-      for (let r = 1; r <= 3; r++) {
-        const ringR = radius * (0.28 + r * 0.27);
-        const alpha = 0.07 + Math.sin(now * 0.4 + r) * 0.025;
+      // Ã¢â€â‚¬Ã¢â€â‚¬ Fine grid background Ã¢â€â‚¬Ã¢â€â‚¬
+      ctx.strokeStyle = 'rgba(255,255,255,0.025)';
+      ctx.lineWidth = 0.5;
+      const step = 40;
+      for (let gx = cx % step; gx < W; gx += step) {
+        ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke();
+      }
+      for (let gy = cy % step; gy < H; gy += step) {
+        ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
+      }
+
+      // Ã¢â€â‚¬Ã¢â€â‚¬ Orbital rings Ã¢â€â‚¬Ã¢â€â‚¬
+      for (let rr = 1; rr <= 3; rr++) {
+        const ringR = R * (0.28 + rr * 0.26);
         ctx.beginPath();
         ctx.arc(cx, cy, ringR, 0, TWO_PI);
-        ctx.strokeStyle = `rgba(196, 0, 255, ${alpha})`;
-        ctx.lineWidth = 0.6;
+        ctx.strokeStyle = `rgba(255,255,255,${0.04 + Math.sin(t * 0.4 + rr) * 0.015})`;
+        ctx.lineWidth = 0.5;
         ctx.stroke();
-        for (let tick = 0; tick < 24; tick++) {
-          const a = (tick / 24) * TWO_PI;
-          const major = tick % 4 === 0;
-          const inner = cx + Math.cos(a) * (ringR - (major ? 4 : 2));
-          const innerY = cy + Math.sin(a) * (ringR - (major ? 4 : 2));
-          const outer = cx + Math.cos(a) * (ringR + (major ? 4 : 2));
-          const outerY = cy + Math.sin(a) * (ringR + (major ? 4 : 2));
+        // tick marks
+        for (let k = 0; k < 36; k++) {
+          const a  = (k / 36) * TWO_PI;
+          const m = k % 9 === 0;
+          const r1 = ringR - (m ? 4 : 2);
+          const r2 = ringR + (m ? 4 : 2);
           ctx.beginPath();
-          ctx.moveTo(inner, innerY);
-          ctx.lineTo(outer, outerY);
-          ctx.strokeStyle = `rgba(196, 0, 255, ${major ? 0.22 : 0.07})`;
+          ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+          ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+          ctx.strokeStyle = `rgba(255,255,255,${m ? 0.14 : 0.04})`;
           ctx.lineWidth = 0.5;
           ctx.stroke();
         }
       }
 
-      // ── Radar sweep ──
-      const radarAngle = radarRef.current;
-      const sweepLen = Math.PI * 0.55;
+      // Ã¢â€â‚¬Ã¢â€â‚¬ Radar sweep (very faint white) Ã¢â€â‚¬Ã¢â€â‚¬
+      const ra = radarRef.current;
+      const sl = Math.PI * 0.55;
       ctx.save();
       ctx.beginPath();
       ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, radius * 1.45, radarAngle - sweepLen, radarAngle);
+      ctx.arc(cx, cy, R * 1.42, ra - sl, ra);
       ctx.closePath();
-      const rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius * 1.45);
+      const rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.42);
       rg.addColorStop(0, 'transparent');
-      rg.addColorStop(0.55, 'rgba(196, 0, 255, 0.035)');
+      rg.addColorStop(0.6, 'rgba(255,255,255,0.025)');
       rg.addColorStop(1, 'transparent');
       ctx.fillStyle = rg;
       ctx.fill();
       ctx.restore();
-      // Sweep leading edge
       ctx.beginPath();
       ctx.moveTo(cx, cy);
-      ctx.lineTo(cx + Math.cos(radarAngle) * radius * 1.45, cy + Math.sin(radarAngle) * radius * 1.45);
-      ctx.strokeStyle = 'rgba(196, 0, 255, 0.40)';
-      ctx.lineWidth = 1;
+      ctx.lineTo(cx + Math.cos(ra) * R * 1.42, cy + Math.sin(ra) * R * 1.42);
+      ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+      ctx.lineWidth = 0.8;
       ctx.stroke();
 
-      // ── Grid crosshairs ──
-      ctx.strokeStyle = 'rgba(196, 0, 255, 0.04)';
-      ctx.lineWidth = 0.5;
-      ctx.setLineDash([4, 8]);
-      ctx.beginPath();
-      ctx.moveTo(cx, cy - radius * 1.6); ctx.lineTo(cx, cy + radius * 1.6);
-      ctx.moveTo(cx - radius * 1.6, cy); ctx.lineTo(cx + radius * 1.6, cy);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // ── Bezier connection lines ──
+      // Ã¢â€â‚¬Ã¢â€â‚¬ Bezier connection lines Ã¢â€â‚¬Ã¢â€â‚¬
       CONNECTIONS.forEach(([a, b]) => {
-        const pa = positions[a]; const pb = positions[b];
-        if (!pa || !pb) return;
-        const aActive = isActive((agentMap[a] || {}).status);
-        const bActive = isActive((agentMap[b] || {}).status);
-        const bothActive = aActive && bActive;
+        const pa = pos[a], pb = pos[b];
+        if (!pa||!pb) return;
+        const aAct = isActive((agentMap[a]||{}).status);
+        const bAct = isActive((agentMap[b]||{}).status);
+        const both = aAct && bAct;
 
-        // Bezier control point (bulge outward from center)
-        const midX = (pa.x + pb.x) / 2;
-        const midY = (pa.y + pb.y) / 2;
-        const dx = midX - cx; const dy = midY - cy;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const bcx = midX + (dx / dist) * radius * 0.28;
-        const bcy = midY + (dy / dist) * radius * 0.28;
+        const mx = (pa.x+pb.x)/2, my = (pa.y+pb.y)/2;
+        const dx = mx-cx, dy = my-cy;
+        const d  = Math.sqrt(dx*dx+dy*dy)||1;
+        const bcx2 = mx + (dx/d)*R*0.25;
+        const bcy2 = my + (dy/d)*R*0.25;
 
         ctx.beginPath();
         ctx.moveTo(pa.x, pa.y);
-        ctx.quadraticCurveTo(bcx, bcy, pb.x, pb.y);
-        if (bothActive) {
-          ctx.strokeStyle = `rgba(255, 204, 0, ${0.50 + Math.sin(now * 2.5) * 0.12})`;
-          ctx.lineWidth = 1.8;
-          ctx.shadowColor = '#ffcc00'; ctx.shadowBlur = 5;
-        } else if (aActive || bActive) {
-          ctx.strokeStyle = 'rgba(196, 0, 255, 0.24)';
-          ctx.lineWidth = 0.9;
-          ctx.shadowBlur = 0;
+        ctx.quadraticCurveTo(bcx2, bcy2, pb.x, pb.y);
+        if (both) {
+          ctx.strokeStyle = `rgba(255,255,255,${0.55+Math.sin(t*2.5)*0.12})`;
+          ctx.lineWidth = 1.5;
+        } else if (aAct||bAct) {
+          ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+          ctx.lineWidth = 0.8;
         } else {
-          ctx.strokeStyle = 'rgba(196, 0, 255, 0.05)';
+          ctx.strokeStyle = 'rgba(255,255,255,0.04)';
           ctx.lineWidth = 0.5;
-          ctx.shadowBlur = 0;
         }
         ctx.stroke();
-        ctx.shadowBlur = 0;
 
-        if ((aActive || bActive) && Math.random() < 0.028) {
-          const color = bothActive ? '#ffcc00' : (aActive ? AGENTS[a]?.color : AGENTS[b]?.color) || '#c400ff';
-          spawnParticle(aActive ? pa : pb, aActive ? pb : pa, color, bcx, bcy);
+        if ((aAct||bAct) && Math.random() < 0.025) {
+          spawnP(aAct?pa:pb, aAct?pb:pa, bcx2, bcy2, both?0.9:0.55);
         }
       });
 
-      // ── Bezier particles ──
+      // Ã¢â€â‚¬Ã¢â€â‚¬ Particles Ã¢â€â‚¬Ã¢â€â‚¬
       particlesRef.current = particlesRef.current.filter(p => {
         p.t += p.speed;
         if (p.t >= 1) return false;
-        const pt = bezierPoint(p.t, p.fx, p.fy, p.cx, p.cy, p.tx, p.ty);
-        const ptPrev = bezierPoint(Math.max(0, p.t - 0.10), p.fx, p.fy, p.cx, p.cy, p.tx, p.ty);
+        const pt   = bz(p.t, p.fx,p.fy, p.cx,p.cy, p.tx,p.ty);
+        const prev = bz(Math.max(0,p.t-0.1), p.fx,p.fy, p.cx,p.cy, p.tx,p.ty);
+        const fade = 1 - p.t;
 
-        const grd = ctx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, p.size * 2.5);
-        grd.addColorStop(0, p.color);
-        grd.addColorStop(1, 'transparent');
         ctx.beginPath();
-        ctx.arc(pt.x, pt.y, p.size * (1 - p.t * 0.5), 0, TWO_PI);
-        ctx.fillStyle = grd;
-        ctx.globalAlpha = (1 - p.t) * 0.85;
+        ctx.arc(pt.x, pt.y, p.size*(1-p.t*0.4), 0, TWO_PI);
+        ctx.fillStyle = `rgba(255,255,255,${fade*p.bright})`;
         ctx.fill();
 
         ctx.beginPath();
-        ctx.moveTo(ptPrev.x, ptPrev.y);
+        ctx.moveTo(prev.x, prev.y);
         ctx.lineTo(pt.x, pt.y);
-        ctx.strokeStyle = p.color;
-        ctx.globalAlpha = (1 - p.t) * 0.40;
+        ctx.strokeStyle = `rgba(255,255,255,${fade*p.bright*0.4})`;
         ctx.lineWidth = p.size * 0.55;
         ctx.stroke();
-        ctx.globalAlpha = 1;
         return true;
       });
 
-      // ── Central CORE node ──
-      const coreColor = nodeConnected ? '#c400ff' : '#ff5500';
-      const coreAlt = nodeConnected ? '#ffcc00' : '#ff2200';
+      // Ã¢â€â‚¬Ã¢â€â‚¬ CORE node Ã¢â€â‚¬Ã¢â€â‚¬
+      const cAlpha = nodeConnected ? 1 : 0.4;
 
-      // Pulse rings from core while online
+      // pulse rings
       if (nodeConnected) {
-        for (let pulse = 0; pulse < 3; pulse++) {
-          const pt = ((now * 0.5) + pulse * 0.33) % 1;
+        for (let p = 0; p < 3; p++) {
+          const pt = ((t*0.45)+p*0.33)%1;
           ctx.beginPath();
-          ctx.arc(cx, cy, 32 + pt * radius * 0.55, 0, TWO_PI);
-          ctx.strokeStyle = `rgba(196, 0, 255, ${(1 - pt) * 0.10})`;
-          ctx.lineWidth = 1.2;
+          ctx.arc(cx, cy, 32+pt*R*0.45, 0, TWO_PI);
+          ctx.strokeStyle = `rgba(255,255,255,${(1-pt)*0.07})`;
+          ctx.lineWidth = 1;
           ctx.stroke();
         }
       }
 
-      // Core multi-rings
-      for (let rr = 0; rr < 3; rr++) {
-        const rRad = 46 + rr * 10;
-        const rA = (0.10 - rr * 0.025) + Math.sin(now * 1.2 + rr) * 0.04;
-        ctx.beginPath();
-        ctx.arc(cx, cy, rRad, 0, TWO_PI);
-        ctx.strokeStyle = rr === 0 ? coreAlt : `rgba(196, 0, 255, ${rA})`;
-        ctx.globalAlpha = rA;
-        ctx.lineWidth = rr === 0 ? 1.5 : 0.8;
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-      }
-
-      // Core glow
-      const cGrd = ctx.createRadialGradient(cx, cy, 0, cx, cy, 42);
-      cGrd.addColorStop(0, nodeConnected ? 'rgba(196, 0, 255, 0.38)' : 'rgba(255, 85, 0, 0.38)');
-      cGrd.addColorStop(0.55, nodeConnected ? 'rgba(196, 0, 255, 0.12)' : 'rgba(255, 85, 0, 0.12)');
-      cGrd.addColorStop(1, 'transparent');
+      // outer accent ring
       ctx.beginPath();
-      ctx.arc(cx, cy, 42, 0, TWO_PI);
-      ctx.fillStyle = cGrd;
-      ctx.fill();
+      ctx.arc(cx, cy, 44, 0, TWO_PI);
+      ctx.strokeStyle = `rgba(255,255,255,${(0.18+Math.sin(t)*0.06)*cAlpha})`;
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
 
-      // Core circle
-      ctx.beginPath();
-      ctx.arc(cx, cy, 28, 0, TWO_PI);
-      ctx.fillStyle = 'rgba(5, 0, 10, 0.96)';
-      ctx.strokeStyle = coreColor;
-      ctx.lineWidth = 2.2;
-      ctx.shadowColor = coreColor;
-      ctx.shadowBlur = 14;
+      // glow fill
+      const cgrd = ctx.createRadialGradient(cx,cy,0,cx,cy,40);
+      cgrd.addColorStop(0, `rgba(255,255,255,${0.12*cAlpha})`);
+      cgrd.addColorStop(0.5,`rgba(255,255,255,${0.04*cAlpha})`);
+      cgrd.addColorStop(1, 'transparent');
+      ctx.beginPath(); ctx.arc(cx,cy,40,0,TWO_PI);
+      ctx.fillStyle = cgrd; ctx.fill();
+
+      // main circle
+      ctx.beginPath(); ctx.arc(cx,cy,28,0,TWO_PI);
+      ctx.fillStyle   = '#000';
+      ctx.strokeStyle = `rgba(255,255,255,${0.80*cAlpha})`;
+      ctx.lineWidth   = 1.8;
       ctx.fill(); ctx.stroke();
-      ctx.shadowBlur = 0;
 
-      // Hex icon
-      drawHexIcon(ctx, cx, cy, 13, coreColor);
+      // hex icon
+      ctx.beginPath();
+      for (let i=0;i<6;i++){
+        const a=(i/6)*TWO_PI-Math.PI/6;
+        if(i===0) ctx.moveTo(cx+Math.cos(a)*12,cy+Math.sin(a)*12);
+        else ctx.lineTo(cx+Math.cos(a)*12,cy+Math.sin(a)*12);
+      }
+      ctx.closePath();
+      ctx.strokeStyle = `rgba(255,255,255,${0.70*cAlpha})`;
+      ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx,cy,3,0,TWO_PI);
+      ctx.fillStyle = `rgba(255,255,255,${0.90*cAlpha})`; ctx.fill();
 
-      // Core labels
-      ctx.font = '700 8.5px Orbitron, sans-serif';
-      ctx.fillStyle = coreColor;
+      // core labels
+      ctx.font = '700 8px Orbitron, sans-serif';
+      ctx.fillStyle = `rgba(255,255,255,${0.80*cAlpha})`;
       ctx.textAlign = 'center';
-      ctx.shadowColor = coreColor; ctx.shadowBlur = 8;
-      ctx.fillText('OPENCLAW', cx, cy + 52);
-      ctx.shadowBlur = 0;
+      ctx.fillText('OPENCLAW', cx, cy+48);
       ctx.font = '400 7px JetBrains Mono, monospace';
-      ctx.fillStyle = 'rgba(255, 204, 0, 0.55)';
-      ctx.fillText('CORE · GATEWAY', cx, cy + 63);
+      ctx.fillStyle = `rgba(255,255,255,${0.35*cAlpha})`;
+      ctx.fillText('CORE Ã‚Â· GATEWAY', cx, cy+59);
       ctx.font = '400 6.5px JetBrains Mono, monospace';
-      ctx.fillStyle = nodeConnected ? 'rgba(0, 255, 170, 0.55)' : 'rgba(255, 34, 0, 0.55)';
-      ctx.fillText(nodeConnected ? '● EC2 CONNECTED' : '● EC2 OFFLINE', cx, cy + 74);
+      ctx.fillStyle = nodeConnected ? 'rgba(74,222,128,0.70)' : 'rgba(248,113,113,0.70)';
+      ctx.fillText(nodeConnected ? 'Ã¢â€”Â EC2 CONNECTED' : 'Ã¢â€”Â EC2 OFFLINE', cx, cy+70);
 
-      // ── Agent nodes ──
-      AGENT_LIST.forEach(([name, config]) => {
-        const pos = positions[name];
-        const data = agentMap[name] || {};
-        const status = (data.status || 'idle').toLowerCase();
-        const active = isActive(status);
-        const statusGlow = STATUS_VISUALS[status]?.glow || '#3d2050';
-        const nodeR = 24;
+      // Ã¢â€â‚¬Ã¢â€â‚¬ Agent nodes Ã¢â€â‚¬Ã¢â€â‚¬
+      AGENT_LIST.forEach(([name]) => {
+        const p   = pos[name];
+        const d   = agentMap[name] || {};
+        const st  = (d.status||'idle').toLowerCase();
+        const act = isActive(st);
+        const err = st === 'error';
+        const nodeR = 23;
 
-        // Core→agent line
+        // determine whiteness
+        const gBright = err ? 0 : act ? 1.0 : 0.25;
+        const strokeAlpha = err ? 0 : act ? 0.85 : 0.20;
+        const nodeCol = err ? '#f87171' : `rgba(255,255,255,${strokeAlpha})`;
+
+        // coreÃ¢â€ â€™agent line
         ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(pos.x, pos.y);
-        ctx.strokeStyle = active
-          ? `rgba(255, 204, 0, ${0.22 + Math.sin(now * 3 + pos.angle) * 0.08})`
-          : 'rgba(196, 0, 255, 0.06)';
-        ctx.lineWidth = active ? 1.3 : 0.6;
-        ctx.setLineDash(active ? [] : [3, 5]);
-        ctx.shadowColor = active ? '#ffcc00' : 'transparent';
-        ctx.shadowBlur = active ? 3 : 0;
-        ctx.stroke();
-        ctx.setLineDash([]); ctx.shadowBlur = 0;
+        ctx.moveTo(cx,cy); ctx.lineTo(p.x,p.y);
+        ctx.strokeStyle = act
+          ? `rgba(255,255,255,${0.22+Math.sin(t*3+p.angle)*0.07})`
+          : 'rgba(255,255,255,0.04)';
+        ctx.lineWidth = act ? 1.2 : 0.5;
+        ctx.setLineDash(act ? [] : [3, 5]);
+        ctx.stroke(); ctx.setLineDash([]);
 
-        // Spawn core→agent particles
-        if (active && Math.random() < 0.022) {
-          spawnParticle({ x: cx, y: cy }, pos, config.color);
+        // spawn coreÃ¢â€ â€™agent particles when active
+        if (act && Math.random() < 0.018) {
+          const mid = { x:(cx+p.x)/2, y:(cy+p.y)/2 };
+          spawnP({x:cx,y:cy}, p, mid.x, mid.y, 0.60);
         }
 
-        // Active pulsing rings
-        if (active) {
-          const pr = nodeR + 7 + Math.sin(now * 3 + pos.angle * 2) * 2.5;
-          ctx.beginPath();
-          ctx.arc(pos.x, pos.y, pr, 0, TWO_PI);
-          ctx.strokeStyle = statusGlow;
-          ctx.globalAlpha = 0.28 + Math.sin(now * 3 + pos.angle) * 0.12;
-          ctx.lineWidth = 1.5; ctx.stroke();
-          ctx.globalAlpha = 1;
-
-          ctx.beginPath();
-          ctx.arc(pos.x, pos.y, nodeR + 14, 0, TWO_PI);
-          ctx.strokeStyle = statusGlow;
-          ctx.globalAlpha = 0.08; ctx.lineWidth = 0.8; ctx.stroke();
-          ctx.globalAlpha = 1;
+        // pulsing status ring
+        if (act) {
+          const pr = nodeR + 6 + Math.sin(t*3+p.angle)*2;
+          ctx.beginPath(); ctx.arc(p.x,p.y,pr,0,TWO_PI);
+          ctx.strokeStyle = `rgba(255,255,255,${0.22+Math.sin(t*3+p.angle)*0.10})`;
+          ctx.lineWidth = 1.2; ctx.stroke();
+        }
+        if (err) {
+          ctx.beginPath(); ctx.arc(p.x,p.y,nodeR+5,0,TWO_PI);
+          ctx.strokeStyle = `rgba(248,113,113,${0.40+Math.sin(t*4)*0.15})`;
+          ctx.lineWidth=1; ctx.stroke();
         }
 
-        // Glow halo
-        const aGrd = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, nodeR + 12);
-        aGrd.addColorStop(0, active ? config.color + '38' : config.color + '0c');
-        aGrd.addColorStop(1, 'transparent');
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, nodeR + 12, 0, TWO_PI);
-        ctx.fillStyle = aGrd; ctx.fill();
+        // glow halo
+        const g = ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,nodeR+10);
+        g.addColorStop(0, act ? `rgba(255,255,255,0.12)` : err ? 'rgba(248,113,113,0.10)' : 'transparent');
+        g.addColorStop(1,'transparent');
+        ctx.beginPath(); ctx.arc(p.x,p.y,nodeR+10,0,TWO_PI);
+        ctx.fillStyle=g; ctx.fill();
 
-        // Main circle
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, nodeR, 0, TWO_PI);
-        ctx.fillStyle = 'rgba(5, 0, 10, 0.96)';
-        ctx.strokeStyle = active ? config.color : config.color + '40';
-        ctx.lineWidth = active ? 2.5 : 1.2;
-        ctx.shadowColor = active ? config.color : 'transparent';
-        ctx.shadowBlur = active ? 10 : 0;
+        // node circle
+        ctx.beginPath(); ctx.arc(p.x,p.y,nodeR,0,TWO_PI);
+        ctx.fillStyle='#000';
+        ctx.strokeStyle= nodeCol;
+        ctx.lineWidth = act||err ? 2.2 : 1;
         ctx.fill(); ctx.stroke();
-        ctx.shadowBlur = 0;
 
-        // Circular health arc
-        const health = status === 'error' ? 0.15 : active ? 0.82 + Math.sin(now + pos.angle) * 0.1 : 0.45;
+        // circular health arc
+        const hp = err ? 0.12 : act ? 0.80+Math.sin(t+p.angle)*0.12 : 0.40;
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, nodeR + 3, -Math.PI / 2, -Math.PI / 2 + health * TWO_PI);
-        ctx.strokeStyle = status === 'error' ? '#ff2200' : active ? statusGlow : '#3d2050';
-        ctx.lineWidth = 2.5;
-        ctx.lineCap = 'round';
-        ctx.globalAlpha = active ? 0.80 : 0.28;
-        ctx.stroke();
-        ctx.globalAlpha = 1; ctx.lineCap = 'butt';
+        ctx.arc(p.x,p.y,nodeR+3,-Math.PI/2,-Math.PI/2+hp*TWO_PI);
+        ctx.strokeStyle = err ? '#f87171' : act ? 'rgba(255,255,255,0.70)' : 'rgba(255,255,255,0.15)';
+        ctx.lineWidth=2; ctx.lineCap='round';
+        ctx.globalAlpha = act||err ? 0.80 : 0.25;
+        ctx.stroke(); ctx.globalAlpha=1; ctx.lineCap='butt';
 
-        // Agent icon
-        ctx.font = '18px serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(config.icon, pos.x, pos.y);
-        ctx.textBaseline = 'alphabetic';
+        // icon
+        ctx.font='16px serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.globalAlpha = act ? 1.0 : err ? 0.6 : 0.30;
+        ctx.fillText(AGENTS[name]?.icon||'?', p.x, p.y);
+        ctx.globalAlpha=1; ctx.textBaseline='alphabetic';
 
-        // Name label
-        const labelY = pos.y + nodeR + 16;
-        ctx.font = '700 9px Orbitron, sans-serif';
-        ctx.fillStyle = active ? config.color : config.color + '70';
-        ctx.textAlign = 'center';
-        ctx.shadowColor = active ? config.color : 'transparent';
-        ctx.shadowBlur = active ? 7 : 0;
-        ctx.fillText(name.toUpperCase(), pos.x, labelY);
-        ctx.shadowBlur = 0;
+        // name
+        const ly = p.y+nodeR+15;
+        ctx.font='700 8.5px Orbitron, sans-serif';
+        ctx.fillStyle= act ? 'rgba(255,255,255,0.88)' : err ? '#f87171' : 'rgba(255,255,255,0.28)';
+        ctx.textAlign='center';
+        ctx.fillText(name.toUpperCase(), p.x, ly);
 
-        // Role
-        ctx.font = '400 6.5px JetBrains Mono, monospace';
-        ctx.fillStyle = active ? 'rgba(255,255,255,0.38)' : 'rgba(255,255,255,0.12)';
-        ctx.fillText(config.role, pos.x, labelY + 11);
+        // role
+        ctx.font='400 6.5px JetBrains Mono, monospace';
+        ctx.fillStyle= act ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.12)';
+        ctx.fillText(AGENTS[name]?.role||'', p.x, ly+11);
 
-        // Status
-        ctx.font = '600 7px JetBrains Mono, monospace';
-        ctx.fillStyle = active ? statusGlow : '#3d2050';
-        ctx.fillText(status.toUpperCase(), pos.x, labelY + 22);
+        // status
+        ctx.font='600 7px JetBrains Mono, monospace';
+        ctx.fillStyle= err ? '#f87171' : act ? 'rgba(255,255,255,0.65)' : 'rgba(255,255,255,0.18)';
+        ctx.fillText(st.toUpperCase(), p.x, ly+22);
 
-        // Current task
-        if (active && data.current_task) {
-          ctx.font = '400 6px JetBrains Mono, monospace';
-          ctx.fillStyle = 'rgba(255, 204, 0, 0.52)';
-          ctx.fillText(truncate(data.current_task, 20), pos.x, labelY + 33);
+        // task
+        if (act && d.current_task) {
+          ctx.font='400 6px JetBrains Mono, monospace';
+          ctx.fillStyle='rgba(255,255,255,0.40)';
+          ctx.fillText(truncate(d.current_task,20), p.x, ly+33);
         }
 
-        // Status dot (top-right of node)
-        ctx.beginPath();
-        ctx.arc(pos.x + nodeR * 0.68, pos.y - nodeR * 0.68, 4, 0, TWO_PI);
-        ctx.fillStyle = statusGlow;
-        ctx.shadowColor = statusGlow;
-        ctx.shadowBlur = active ? 7 : 0;
-        ctx.fill(); ctx.shadowBlur = 0;
+        // status dot top-right
+        ctx.beginPath(); ctx.arc(p.x+nodeR*0.68, p.y-nodeR*0.68, 3.5, 0, TWO_PI);
+        ctx.fillStyle= err ? '#f87171' : act ? 'rgba(74,222,128,0.90)' : 'rgba(255,255,255,0.18)';
+        ctx.fill();
       });
 
-      // ── HUD corner brackets ──
-      drawHUDCorners(ctx, 14, 14, w - 28, h - 28);
+      // Ã¢â€â‚¬Ã¢â€â‚¬ HUD corner brackets Ã¢â€â‚¬Ã¢â€â‚¬
+      const len=20;
+      ctx.strokeStyle='rgba(255,255,255,0.18)'; ctx.lineWidth=1;
+      [[14,14,1,1],[W-14,14,-1,1],[14,H-14,1,-1],[W-14,H-14,-1,-1]].forEach(([x,y,sx,sy])=>{
+        ctx.beginPath();
+        ctx.moveTo(x,y+sy*len); ctx.lineTo(x,y); ctx.lineTo(x+sx*len,y);
+        ctx.stroke();
+      });
 
-      // ── Overlay timestamps & stats ──
-      ctx.font = '400 8px JetBrains Mono, monospace';
-      ctx.fillStyle = 'rgba(255, 204, 0, 0.44)';
-      ctx.textAlign = 'left';
-      ctx.fillText(`T:${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}`, 22, h - 22);
-
-      const activeCount = AGENT_LIST.filter(([n]) => isActive((agentMap[n]?.status || ''))).length;
-      ctx.textAlign = 'right';
-      ctx.fillText(`${activeCount}/${AGENT_LIST.length} ACTIVE`, w - 22, h - 22);
-
-      ctx.fillStyle = 'rgba(196, 0, 255, 0.32)';
-      ctx.font = '400 7px JetBrains Mono, monospace';
-      ctx.textAlign = 'right';
-      ctx.fillText('NEURAL MAP · OPENCLAW v2026', w - 22, 28);
+      // Ã¢â€â‚¬Ã¢â€â‚¬ HUD text overlays Ã¢â€â‚¬Ã¢â€â‚¬
+      ctx.font='400 8px JetBrains Mono, monospace';
+      ctx.fillStyle='rgba(255,255,255,0.30)';
+      ctx.textAlign='left';
+      ctx.fillText(`T:${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})}`, 22, H-20);
+      const ac=AGENT_LIST.filter(([n])=>isActive((agentMap[n]?.status||''))).length;
+      ctx.textAlign='right';
+      ctx.fillText(`${ac}/${AGENT_LIST.length} ONLINE`, W-22, H-20);
+      ctx.fillStyle='rgba(255,255,255,0.16)'; ctx.font='400 7px JetBrains Mono, monospace';
+      ctx.fillText('OPENCLAW Ã‚Â· NEURAL MAP', W-22, 26);
 
       animRef.current = requestAnimationFrame(draw);
     };
@@ -447,40 +390,13 @@ export default function NodeGraph({ agents, nodeConnected, events }) {
   }, [agentMap, nodeConnected, recentEvents]);
 
   return (
-    <div className="relative w-full h-full min-h-[380px]">
+    <div className="relative w-full h-full min-h-[360px]">
       <canvas ref={canvasRef} className="w-full h-full" style={{ display: 'block' }} />
     </div>
   );
 }
 
-function isActive(status) {
-  const s = (status || '').toLowerCase();
-  return s === 'working' || s === 'thinking' || s === 'talking' || s === 'posting' || s === 'researching' || s === 'monitoring';
-}
-
-function drawHexIcon(ctx, cx, cy, size, color) {
-  ctx.beginPath();
-  for (let i = 0; i < 6; i++) {
-    const angle = (i / 6) * TWO_PI - Math.PI / 6;
-    if (i === 0) ctx.moveTo(cx + Math.cos(angle) * size, cy + Math.sin(angle) * size);
-    else ctx.lineTo(cx + Math.cos(angle) * size, cy + Math.sin(angle) * size);
-  }
-  ctx.closePath();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(cx, cy, 3.5, 0, TWO_PI);
-  ctx.fillStyle = color;
-  ctx.fill();
-}
-
-function drawHUDCorners(ctx, x, y, w, h) {
-  const len = 22;
-  ctx.strokeStyle = 'rgba(255, 204, 0, 0.24)';
-  ctx.lineWidth = 1.2;
-  ctx.beginPath(); ctx.moveTo(x, y + len); ctx.lineTo(x, y); ctx.lineTo(x + len, y); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(x + w - len, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + len); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(x, y + h - len); ctx.lineTo(x, y + h); ctx.lineTo(x + len, y + h); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(x + w - len, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - len); ctx.stroke();
+function isActive(s) {
+  const v = (s||'').toLowerCase();
+  return v==='working'||v==='thinking'||v==='talking'||v==='posting'||v==='researching'||v==='monitoring';
 }
