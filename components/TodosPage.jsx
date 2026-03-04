@@ -99,9 +99,13 @@ export default function TodosPage({ supabase }) {
   );
 }
 
+const SOURCE_ICONS = { telegram: '✈️', discord: '💬', whatsapp: '📱', manual: '✏️', chat: '💬' };
+
 function TodoItem({ todo, done, onToggle, onDelete }) {
   const pri = todo.priority || 'medium';
   const col = PRIORITY_COLORS[pri] || PRIORITY_COLORS.medium;
+  const srcIcon = SOURCE_ICONS[todo.source] || '';
+  const isAutoTask = todo.source && todo.source !== 'manual';
   return (
     <div className="agent-card flex items-start gap-3" style={{ opacity: done ? 0.5 : 1 }}>
       <button onClick={() => onToggle(todo.id, todo.done)} className="mt-0.5 text-base flex-shrink-0 cursor-pointer hover:scale-110 transition-transform">
@@ -111,7 +115,19 @@ function TodoItem({ todo, done, onToggle, onDelete }) {
         <div className="text-[13px] font-medium text-white" style={{ textDecoration: done ? 'line-through' : '' }}>
           {todo.title}
         </div>
-        {todo.agent && <div className="text-[11px] mt-0.5" style={{ color: 'rgba(255,255,255,0.35)' }}>Agent: {todo.agent}</div>}
+        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+          {todo.agent && <span className="text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>Agent: {todo.agent}</span>}
+          {isAutoTask && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(0,180,255,0.12)', color: 'rgba(0,180,255,0.8)', border: '1px solid rgba(0,180,255,0.2)' }}>
+              {srcIcon} {todo.source}
+            </span>
+          )}
+          {todo.assigned_by && (
+            <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.28)' }}>
+              by {todo.assigned_by}
+            </span>
+          )}
+        </div>
       </div>
       <span className="text-[10px] font-bold px-2 py-0.5 rounded flex-shrink-0"
         style={{ background: col + '20', color: col, border: `1px solid ${col}35` }}>

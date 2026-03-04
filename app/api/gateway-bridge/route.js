@@ -54,6 +54,157 @@ const AGENT_MAP = {
   forge: 'forge',
 };
 
+// ─── Telegram → Todo sync ────────────────────────────────────
+// Detects channel from sessionKey or payload metadata
+function detectChannel(payload) {
+  const sessionKey = payload?.sessionKey || '';
+  if (sessionKey.includes('telegram')) return 'telegram';
+  if (sessionKey.includes('discord')) return 'discord';
+  if (sessionKey.includes('whatsapp')) return 'whatsapp';
+  const channel = payload?.channel || payload?.data?.channel || '';
+  if (channel) return channel.toLowerCase();
+  const str = JSON.stringify(payload || {}).toLowerCase();
+  if (str.includes('telegram')) return 'telegram';
+  return null;
+}
+
+// Extract sender info from payload
+function extractSender(payload) {
+  const from = payload?.data?.from || payload?.from || payload?.sender || '';
+  if (from) return String(from);
+  const sessionKey = payload?.sessionKey || '';
+  // sessionKey format: agent:main:telegram:dm:1710652280
+  const parts = sessionKey.split(':');
+  const tgIdx = parts.indexOf('telegram');
+  if (tgIdx >= 0 && parts[tgIdx + 2]) return `tg:${parts[tgIdx + 2]}`;
+  return null;
+}
+
+// Skip messages that are just greetings, commands, or too short to be tasks
+const SKIP_PATTERNS = [
+  /^(hi|hello|hey|yo|sup|thanks|thank you|ok|okay|k|bye|gm|gn|good morning|good night)\s*[!.?]*$/i,
+  /^\/(start|help|status|model|config|debug|restart|new|reset|todo|done|session)\b/i,
+  /^[^a-zA-Z]*$/,  // no letter content
+];
+
+function isActionableMessage(text) {
+  if (!text || text.trim().length < 8) return false;
+  const trimmed = text.trim();
+  for (const pat of SKIP_PATTERNS) {
+    if (pat.test(trimmed)) return false;
+  }
+  return true;
+}
+
+// Guess priority from message text
+function guessPriority(text) {
+  const lower = text.toLowerCase();
+  if (lower.includes('urgent') || lower.includes('asap') || lower.includes('critical') || lower.includes('immediately')) return 'high';
+  if (lower.includes('when you can') || lower.includes('low priority') || lower.includes('no rush') || lower.includes('whenever')) return 'low';
+  return 'medium';
+}
+
+// Create a todo from an incoming chat message
+async function createTodoFromChat(agent, text, channel, sender, runId) {
+  if (!isActionableMessage(text)) return null;
+
+  const title = text.trim().length > 120 ? text.trim().slice(0, 117) + '...' : text.trim();
+  const priority = guessPriority(text);
+  const assignedBy = sender || (channel === 'telegram' ? '@anshc022' : 'user');
+
+  try {
+    const { data, error } = await supabase.from('ops_todos').insert({
+      title,
+      agent: agent || 'echo',
+      priority,
+      source: channel || 'chat',
+      assigned_by: assignedBy,
+      run_id: runId || null,
+      done: false,
+    }).select('id').single();
+
+    if (error) {
+      console.error('[TodoSync] Insert error:', error.message);
+      return null;
+    }
+
+    console.log(`[TodoSync] Created todo #${data.id} for ${agent} from ${channel}: ${title.slice(0, 50)}`);
+
+    // Log event
+    await supabase.from('ops_events').insert({
+      agent: agent || 'echo',
+      event_type: 'task',
+      title: `📋 New todo from ${channel}: ${title.slice(0, 60)}`,
+    });
+
+    return data.id;
+  } catch (err) {
+    console.error('[TodoSync] Error:', err.message);
+    return null;
+  }
+}
+
+// Mark the most recent pending todo for an agent as done
+async function markAgentTodoDone(agent, runId) {
+  try {
+    // First try to match by run_id for exact match
+    if (runId) {
+      const { data: byRun } = await supabase.from('ops_todos')
+        .select('id, title')
+        .eq('run_id', runId)
+        .eq('done', false)
+        .limit(1);
+
+      if (byRun && byRun.length > 0) {
+        await supabase.from('ops_todos').update({
+          done: true,
+          updated_at: new Date().toISOString(),
+        }).eq('id', byRun[0].id);
+
+        console.log(`[TodoSync] ✅ Marked todo #${byRun[0].id} done (run_id match): ${byRun[0].title.slice(0, 50)}`);
+
+        await supabase.from('ops_events').insert({
+          agent,
+          event_type: 'complete',
+          title: `✅ Todo done: ${byRun[0].title.slice(0, 60)}`,
+        });
+        return byRun[0].id;
+      }
+    }
+
+    // Fallback: mark the oldest pending todo for this agent from telegram/chat
+    const { data: pending } = await supabase.from('ops_todos')
+      .select('id, title')
+      .eq('agent', agent)
+      .eq('done', false)
+      .in('source', ['telegram', 'chat', 'discord', 'whatsapp'])
+      .order('created_at', { ascending: true })
+      .limit(1);
+
+    if (pending && pending.length > 0) {
+      await supabase.from('ops_todos').update({
+        done: true,
+        updated_at: new Date().toISOString(),
+      }).eq('id', pending[0].id);
+
+      console.log(`[TodoSync] ✅ Marked todo #${pending[0].id} done (oldest pending): ${pending[0].title.slice(0, 50)}`);
+
+      await supabase.from('ops_events').insert({
+        agent,
+        event_type: 'complete',
+        title: `✅ Todo done: ${pending[0].title.slice(0, 60)}`,
+      });
+      return pending[0].id;
+    }
+
+    return null;
+  } catch (err) {
+    console.error('[TodoSync] markDone error:', err.message);
+    return null;
+  }
+}
+// ─── End Telegram → Todo sync ────────────────────────────────
+
 // Reverse map: display name → gateway agentId
 const DISPLAY_TO_GW = {
   echo: 'main', flare: 'flare', bolt: 'bolt',
@@ -721,6 +872,9 @@ async function processGatewayMessage(msg) {
         title: `Completed${run?.toolCalls.length ? ` (${run.toolCalls.length} tools used)` : ''}`,
       });
 
+      // ─── Auto-mark todo done when agent finishes ───
+      await markAgentTodoDone(agent, runId);
+
       if (runId) setTimeout(() => activeRuns.delete(runId), 5000);
       return { type: 'lifecycle_end', agent, isSubagent };
     }
@@ -806,6 +960,12 @@ async function processGatewayMessage(msg) {
           to_agent: agent,
           message: text.slice(0, 1500),
         });
+
+        // ─── Auto-create todo from incoming chat messages ───
+        const channel = detectChannel(payload);
+        const sender = extractSender(payload);
+        const todoId = await createTodoFromChat(agent, text, channel, sender, runId);
+        if (todoId && run) run.todoId = todoId;
       }
 
       await supabase.from('ops_events').insert({

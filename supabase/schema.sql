@@ -142,6 +142,9 @@ create table if not exists ops_todos (
   agent       text,
   priority    text default 'medium',   -- high | medium | low
   done        boolean default false,
+  source      text default 'manual',   -- manual | telegram | discord | whatsapp | chat
+  assigned_by text,                    -- who assigned the task (e.g. @anshc022)
+  run_id      text,                    -- OpenClaw run ID for auto-done tracking
   created_at  timestamptz default now(),
   updated_at  timestamptz default now()
 );
