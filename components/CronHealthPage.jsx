@@ -2,7 +2,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { getMergedMeta } from '@/lib/agents';
 
-export default function CronHealthPage({ agents, activity, supabase }) {
+export default function CronHealthPage({ agents, activity }) {
   const [time, setTime] = useState(new Date());
   useEffect(() => { const id = setInterval(() => setTime(new Date()), 15000); return () => clearInterval(id); }, []);
 
@@ -135,7 +135,7 @@ function HeartbeatTimeline({ heartbeats, intervalMin, now, color }) {
       {buckets.map((hit, i) => (
         <div key={i} className="rounded-sm" style={{ width: 8, height: 14, background: hit ? color : 'rgba(255,255,255,0.06)', opacity: hit ? 0.8 : 1, border: `1px solid ${hit ? color + '55' : 'rgba(255,255,255,0.08)'}`, transition: 'background 0.3s' }} />
       ))}
-      <span className="text-[8px] ml-1" style={{ color: 'rgba(255,255,255,0.20)' }}>2h</span>
+      <span className="text-[8px] ml-1" style={{ color: 'rgba(255,255,255,0.20)' }}>{Math.round(slots * intervalMin / 60)}h</span>
     </div>
   );
 }

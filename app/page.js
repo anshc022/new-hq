@@ -166,7 +166,7 @@ export default function Page() {
             </div>
           )}
           {nav === 'todos'    && <div className="p-6 h-full overflow-auto"><TodosPage supabase={supabase} /></div>}
-          {nav === 'cron'     && <div className="p-6 h-full overflow-auto"><CronHealthPage agents={agents} activity={activity} supabase={supabase} /></div>}
+          {nav === 'cron'     && <div className="p-6 h-full overflow-auto"><CronHealthPage agents={agents} activity={activity} /></div>}
           {nav === 'goals'    && <div className="p-6 h-full overflow-auto"><GoalsPage supabase={supabase} /></div>}
           {nav === 'blockers' && <div className="p-6 h-full overflow-auto"><BlockersPage supabase={supabase} /></div>}
           {nav === 'revenue'  && <div className="p-6 h-full overflow-auto"><RevenuePage supabase={supabase} /></div>}

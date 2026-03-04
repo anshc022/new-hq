@@ -7,6 +7,8 @@ export default function RevenuePage({ supabase }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({});
   const [form, setForm] = useState({ label: '', amount: '', currency: 'USD', source: '', agent: '' });
 
   const load = useCallback(async () => {
@@ -42,6 +44,26 @@ export default function RevenuePage({ supabase }) {
     await supabase.from('ops_revenue').delete().eq('id', id);
   };
 
+  const startEdit = (entry) => {
+    setEditingId(entry.id);
+    setEditForm({ label: entry.label, amount: entry.amount, currency: entry.currency || 'USD', source: entry.source || '', agent: entry.agent || '' });
+  };
+
+  const saveEdit = async () => {
+    if (!editingId || !supabase) return;
+    await supabase.from('ops_revenue').update({
+      label: editForm.label.trim(),
+      amount: parseFloat(editForm.amount),
+      currency: editForm.currency,
+      source: editForm.source.trim() || null,
+      agent: editForm.agent.trim() || null,
+    }).eq('id', editingId);
+    setEditingId(null);
+    setEditForm({});
+  };
+
+  const cancelEdit = () => { setEditingId(null); setEditForm({}); };
+
   // revenue stats by currency
   const totals = {};
   entries.forEach(e => {
@@ -49,11 +71,20 @@ export default function RevenuePage({ supabase }) {
     totals[c] = (totals[c] || 0) + (e.amount || 0);
   });
 
-  // per-agent breakdown
+  // per-agent breakdown (grouped by currency)
   const byAgent = {};
   entries.forEach(e => {
     const a = e.agent || 'uncategorized';
-    byAgent[a] = (byAgent[a] || 0) + (e.amount || 0);
+    const c = e.currency || 'USD';
+    if (!byAgent[a]) byAgent[a] = {};
+    byAgent[a][c] = (byAgent[a][c] || 0) + (e.amount || 0);
+  });
+  // Flatten for display — total in dominant currency
+  const agentTotals = {};
+  Object.entries(byAgent).forEach(([agent, currencies]) => {
+    const totalAmt = Object.values(currencies).reduce((s, v) => s + v, 0);
+    const dominantCur = Object.entries(currencies).sort((a, b) => b[1] - a[1])[0]?.[0] || 'USD';
+    agentTotals[agent] = { amount: totalAmt, currency: dominantCur };
   });
 
   const fmt = (amt, cur) => `${CURRENCY_SYMBOLS[cur] || cur}${Number(amt).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -96,12 +127,12 @@ export default function RevenuePage({ supabase }) {
       </div>
 
       {/* Agent Breakdown */}
-      {Object.keys(byAgent).length > 0 && (
+      {Object.keys(agentTotals).length > 0 && (
         <div className="agent-card mb-5">
           <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(255,255,255,0.30)', fontFamily: 'JetBrains Mono, monospace' }}>By Agent</div>
           <div className="flex flex-col gap-1.5">
-            {Object.entries(byAgent).sort((a,b) => b[1] - a[1]).map(([agent, amt]) => {
-              const maxAmt = Math.max(...Object.values(byAgent));
+            {Object.entries(agentTotals).sort((a,b) => b[1].amount - a[1].amount).map(([agent, { amount: amt, currency: cur }]) => {
+              const maxAmt = Math.max(...Object.values(agentTotals).map(v => v.amount));
               const pct = maxAmt > 0 ? (amt / maxAmt * 100) : 0;
               return (
                 <div key={agent} className="flex items-center gap-2">
@@ -109,7 +140,7 @@ export default function RevenuePage({ supabase }) {
                   <div className="flex-1 h-[6px] rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
                     <div className="h-full rounded-full" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #22c55e, #4ade80)' }} />
                   </div>
-                  <span className="text-[11px] w-[70px] text-right" style={{ color: '#22c55e', fontFamily: 'JetBrains Mono, monospace' }}>{fmt(amt, 'USD')}</span>
+                  <span className="text-[11px] w-[70px] text-right" style={{ color: '#22c55e', fontFamily: 'JetBrains Mono, monospace' }}>{fmt(amt, cur)}</span>
                 </div>
               );
             })}
@@ -150,7 +181,30 @@ export default function RevenuePage({ supabase }) {
       {loading && <div className="py-10 text-center text-[13px]" style={{ color: 'rgba(255,255,255,0.25)' }}>Loading...</div>}
 
       {/* Entries list */}
-      {entries.map(e => (
+      {entries.map(e => editingId === e.id ? (
+        <div key={e.id} className="agent-card mb-2 flex flex-col gap-2" style={{ border: '1px solid rgba(34,197,94,0.30)' }}>
+          <div className="flex gap-2">
+            <input value={editForm.label} onChange={ev => setEditForm({ ...editForm, label: ev.target.value })}
+              className="flex-1 bg-transparent text-[13px] text-white outline-none placeholder:text-white/20" placeholder="Label" />
+            <select value={editForm.currency} onChange={ev => setEditForm({ ...editForm, currency: ev.target.value })}
+              className="bg-transparent text-[11px] outline-none cursor-pointer" style={{ color: '#22c55e' }}>
+              <option value="USD">USD</option><option value="EUR">EUR</option><option value="GBP">GBP</option><option value="INR">INR</option>
+            </select>
+            <input value={editForm.amount} onChange={ev => setEditForm({ ...editForm, amount: ev.target.value })} type="number" step="0.01"
+              className="w-24 bg-transparent text-[13px] text-white outline-none placeholder:text-white/20 text-right" placeholder="Amount" />
+          </div>
+          <div className="flex gap-2">
+            <input value={editForm.source} onChange={ev => setEditForm({ ...editForm, source: ev.target.value })}
+              className="flex-1 bg-transparent text-[11px] text-white outline-none placeholder:text-white/20" placeholder="Source" />
+            <input value={editForm.agent} onChange={ev => setEditForm({ ...editForm, agent: ev.target.value })}
+              className="flex-1 bg-transparent text-[11px] text-white outline-none placeholder:text-white/20" placeholder="Agent" />
+            <button onClick={saveEdit} className="px-2 py-0.5 rounded text-[10px] font-bold"
+              style={{ background: 'rgba(34,197,94,0.20)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.30)' }}>SAVE</button>
+            <button onClick={cancelEdit} className="px-2 py-0.5 rounded text-[10px]"
+              style={{ color: 'rgba(255,255,255,0.35)' }}>Cancel</button>
+          </div>
+        </div>
+      ) : (
         <div key={e.id} className="agent-card mb-2 flex items-center gap-3">
           <div className="flex-1">
             <div className="flex items-center gap-2">
@@ -163,6 +217,7 @@ export default function RevenuePage({ supabase }) {
             </div>
           </div>
           <span className="text-[15px] font-bold" style={{ color: '#22c55e', fontFamily: 'JetBrains Mono, monospace' }}>{fmt(e.amount, e.currency)}</span>
+          <button onClick={() => startEdit(e)} className="text-[11px] hover:opacity-80" style={{ color: 'rgba(255,255,255,0.30)' }} title="Edit">✎</button>
           <button onClick={() => deleteEntry(e.id)} className="text-[12px] hover:text-red-400" style={{ color: 'rgba(255,255,255,0.20)' }}>✕</button>
         </div>
       ))}

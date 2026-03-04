@@ -197,6 +197,14 @@ export default function NodeGraph({ agents, relationships, nodeConnected, events
   const frameRef = useRef(0);
   const nodesRef = useRef(null);
   const simStartRef = useRef(Date.now());
+  const prevAgentCountRef = useRef(0);
+
+  // Store live data in refs so the animation loop never restarts on data changes
+  const agentsRef = useRef(agents);
+  const agentListRef = useRef([]);
+  const agentMapRef = useRef({});
+  const edgesRef = useRef([]);
+  const agentActivityRef = useRef({});
 
   // Dynamic agent list — merges Supabase identity with static config
   const agentList = useMemo(() => buildAgentList(agents), [agents]);
@@ -224,12 +232,36 @@ export default function NodeGraph({ agents, relationships, nodeConnected, events
     last_interaction_at: r.last_interaction_at || r.updated_at || r.created_at,
   })), [relationships]);
 
+  // Sync memos into refs (cheap, no animation restart)
+  useEffect(() => { agentsRef.current = agents; }, [agents]);
+  useEffect(() => { agentListRef.current = agentList; }, [agentList]);
+  useEffect(() => { agentMapRef.current = agentMap; }, [agentMap]);
+  useEffect(() => { edgesRef.current = edges; }, [edges]);
+  useEffect(() => { agentActivityRef.current = agentActivityTimes; }, [agentActivityTimes]);
+
+  // Only re-init force positions when agent COUNT changes, not every data update
+  useEffect(() => {
+    if (agentList.length !== prevAgentCountRef.current && canvasRef.current) {
+      prevAgentCountRef.current = agentList.length;
+      nodesRef.current = initForcePositions(canvasRef.current.width, canvasRef.current.height, agentList);
+      simStartRef.current = Date.now();
+    }
+  }, [agentList]);
+
+  // Stable draw — reads from refs, never recreated
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const W = canvas.width, H = canvas.height;
     const t = frameRef.current;
+
+    // Read from stable refs
+    const agentList = agentListRef.current;
+    const agentMap = agentMapRef.current;
+    const edges = edgesRef.current;
+    const agentActivityTimes = agentActivityRef.current;
+    const agents = agentsRef.current;
 
     if (!nodesRef.current) nodesRef.current = initForcePositions(W, H, agentList);
     const age = Date.now() - simStartRef.current;
@@ -541,15 +573,17 @@ export default function NodeGraph({ agents, relationships, nodeConnected, events
     // ── Minimap ──
     drawMinimap(ctx, pos, W, H, edges, agentList);
 
-  }, [agents, edges, agentMap, agentActivityTimes, agentList]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);  // Stable — reads from refs, never needs recreation
 
   const resize = useCallback(() => {
     const c = canvasRef.current; if (!c) return;
     const parent = c.parentElement;
     c.width = parent.clientWidth; c.height = parent.clientHeight;
-    nodesRef.current = initForcePositions(c.width, c.height, agentList);
+    // Re-init positions on actual canvas resize
+    nodesRef.current = initForcePositions(c.width, c.height, agentListRef.current);
     simStartRef.current = Date.now();
-  }, [agentList]);
+  }, []);
 
   useEffect(() => {
     resize();
