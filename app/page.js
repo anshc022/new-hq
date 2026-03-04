@@ -30,7 +30,7 @@ const NAV_LABELS = {
 
 export default function Page() {
   const [nav, setNav] = useState('agents');
-  const [view, setView] = useState('GRID');
+  const [view, setView] = useState('NEURAL');
   const [agents, setAgents] = useState([]);
   const [events, setEvents] = useState([]);
   const [activity, setActivity] = useState([]);
